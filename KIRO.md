@@ -51,6 +51,15 @@ dev.echo/
 │   │   ├── __init__.py
 │   │   ├── server.py                # Unix socket server (asyncio)
 │   │   └── protocol.py              # Message protocol definitions
+│   ├── kb/
+│   │   ├── __init__.py
+│   │   ├── manager.py               # Knowledge base document manager
+│   │   └── exceptions.py            # KB-specific exceptions
+│   ├── llm/
+│   │   ├── __init__.py
+│   │   ├── agent.py                 # Strands Agent with Ollama
+│   │   ├── service.py               # LLM service layer
+│   │   └── exceptions.py            # LLM-specific exceptions
 │   └── transcription/
 │       ├── __init__.py
 │       ├── engine.py                # MLX-Whisper transcription engine
@@ -65,129 +74,36 @@ dev.echo/
         └── dev-echo-steering.md     # AI assistant rules
 ```
 
-## Implementation Progress
+## Implementation
 
-### ✅ Completed Tasks
+##### TUI Implementation Pattern: "Append to Scrollback + Redraw Prompt"
+The TUI follows the Claude Code pattern for terminal rendering:
 
-#### Task 1: Project Structure and Build Configuration
-- [x] 1.1 Swift Package with ArgumentParser, swift-log
-- [x] 1.2 Python backend with mlx-whisper, strands-agents, ollama
-- [x] 1.3 IPC foundation (Unix Domain Socket server/client, JSON protocol)
+1. **No Alternate Screen Buffer** - Uses normal terminal mode so all output goes to native scrollback buffer
+2. **Native Mouse Scroll** - Terminal's built-in scrollback allows natural mouse scrolling through history
+3. **Scrollback Pattern** - New content (transcripts, messages) is simply printed and scrolls up naturally
+4. **Prompt Restoration** - When async content arrives during input, current line is cleared, content printed, then prompt restored with current input
+5. **Same-Source Line Aggregation** - Consecutive transcripts from same source update the same line instead of creating new lines
 
-#### Task 2: Command Parser
-- [x] 2.1 Command enum and CommandParser implementation
-  - All commands: `/new`, `/managekb`, `/quit`, `/chat`, `/quick`, `/stop`, `/save`, `/list`, `/remove`, `/update`, `/add`
-  - Handles quoted paths for `/add` and `/update`
+```
+[Terminal Scrollback Buffer - mouse scrollable]
+│
+│  🔊 [10:30:15] Let's discuss the API design and how we should...  ← updates in place
+│  🎤 [10:30:18] I think we should use REST for this...             ← updates in place
+│  ✅ Connected to Python backend
+│  ... (all output scrolls up naturally)
+│
+├─────────────────────────────────────
+│  🎙️ Transcribing │ 🔊ON 🎤ON │ /chat /quick /stop /save /quit
+│  ❯ _                              ← cursor here
+```
 
-#### Task 3: Terminal UI Manager (Claude Code Style)
-- [x] 3.1 TUIEngine with header, transcript area, input, status bar
-- [x] 3.2 StatusBarManager with real-time status updates
-- [x] 3.3 ProcessingIndicator with animated spinner
-
-#### Task 4: Application Mode Management
-- [x] 4.1 ApplicationModeStateMachine with mode transitions
-  - Mode transitions: command → transcribing, command → kb_management
-  - Mode-specific command validation via `validCommands` and `isValidCommand()`
-  - `ModeTransitionResult` enum for transition outcomes
-  - Integrated into Application class in main.swift
-
-#### Task 6: Audio Capture Engine
-- [x] 6.1 SystemAudioCapture (ScreenCaptureKit, macOS 13+)
-  - SCStream for system audio capture
-  - Permission checking and requesting
-  - Audio sample extraction from CMSampleBuffer
-- [x] 6.2 MicrophoneCapture (AVAudioEngine)
-  - AVAudioEngine tap for mic input
-  - Permission handling via AVCaptureDevice
-  - Mono conversion for stereo input
-- [x] 6.3 SampleRateConverter (48kHz → 16kHz)
-  - vDSP-based low-pass filter and decimation
-  - Maintains audio quality during conversion
-- [x] 6.5 AudioCaptureEngine (unified + IPC streaming)
-  - Manages both system and mic capture
-  - Streams converted audio to Python backend via IPC
-  - Status and permission callbacks
-  - Debug mode support with runtime toggle (Ctrl+B)
-
-#### Task 7: Transcription Engine (Python)
-- [x] 7.1 MLX-Whisper transcription service
-  - TranscriptionEngine class with model initialization
-  - Async transcribe() method for audio processing
-  - Custom exceptions (TranscriptionError, ModelInitializationError, AudioProcessingError)
-  - English-only transcription (`language="en"`)
-- [x] 7.2 Stream transcription with source tracking
-  - TranscriptionService with audio buffering
-  - Source identification (system/microphone) maintained
-  - Error recovery with logging and continuation
-  - Integration with IPC server for real-time results
-
-#### Task 8: Checkpoint - Audio Pipeline
-- [x] All Swift tests passing (49 tests)
-- [x] Python backend tests added and passing (18 tests)
-  - `test_protocol.py`: IPC protocol tests
-  - `test_transcription.py`: Transcription engine tests
-
-#### Debug Mode Implementation
-- [x] `--debug` CLI flag for Swift app
-- [x] `--debug` CLI flag for Python backend
-- [x] Ctrl+B runtime toggle for debug mode
-- [x] Debug mode propagation to all Audio components
-- [x] IPCClient debug mode with `setDebug()` method
-
-#### Task 9: Local LLM Integration (Python)
-- [x] 9.1 Strands Agent with Ollama provider
-  - LocalLLMAgent class with Ollama/Llama integration
-  - Ollama service availability checking
-  - Model existence validation
-  - Custom exceptions (OllamaUnavailableError, ModelNotFoundError)
-- [x] 9.2 Query method with context inclusion
-  - ConversationContext and TranscriptContext dataclasses
-  - Context building from transcript history
-  - LLMService for IPC integration
-  - LLM query handler in DevEchoBackend
-
-#### Task 10: Transcript Management
-- [x] 10.1 Transcript and TranscriptEntry models
-  - TranscriptEntry with timestamp, source, content, LLM response support
-  - Transcript model with entries collection, start/end time
-  - Chronological ordering maintained via addEntry/addLLMResponse
-  - Markdown export with toMarkdown() method
-- [x] 10.2 Transcript ordering and display
-  - TUIEngine updated to use Transcript model
-  - Entries sorted by timestamp (chronological order)
-  - New entries scroll from bottom (most recent at bottom)
-  - Line-count aware scrolling for multi-line entries
-- [x] 10.4 Markdown export
-  - TranscriptExporter with export to path, Documents, or current directory
-  - TranscriptExportResult and TranscriptExportError types
-  - TUIEngine integration with saveTranscript methods
-  - Error handling for empty transcript, invalid path, permission denied, disk full
-
-#### Task 13: Wire Components Together
-- [x] 13.1 Main application loop
-  - Ctrl+Q handling for graceful shutdown (Requirement 1.2)
-  - Signal handler for SIGINT
-  - Command routing to appropriate handlers
-  - Mode-specific command validation with helpful error messages
-- [x] 13.2 Transcribing Mode flow
-  - /new starts audio capture and new transcript session
-  - Real-time transcription display via IPC
-  - /chat and /quick commands with LLM integration
-  - Context building from transcript history (Requirement 7.2)
-  - Processing indicator with elapsed time (Requirement 3.8)
-  - /stop, /save, /quit commands fully functional
-- [x] 13.3 KB Management Mode flow
-  - /list, /add, /update, /remove commands with validation
-  - Markdown file validation (Requirement 4.5)
-  - File existence checking
-  - Placeholder for KB Manager (Task 11)
-
-### 🔲 Pending Tasks
-- [ ] **Task 10**: Transcript Management (optional PBT tasks remaining)
-- [ ] **Task 11**: Knowledge Base Manager (Python)
-- [ ] **Task 12**: Checkpoint - Backend services
-- [x] **Task 13**: Wire components together
-- [ ] **Task 14**: Final checkpoint
+Key implementation details:
+- Status bar + commands shown before each prompt (not fixed footer)
+- Async transcript updates: `\r\e[K` clears line, prints content, restores `❯ {input}`
+- Same-source aggregation: `\e[A\e[K` moves up and clears to update previous transcript line
+- Tracks `lastTranscriptSource`, `lastTranscriptLine`, `lastTranscriptTimestamp` for aggregation
+- All debug logs and messages use same scrollback pattern
 
 ## Key Components
 
@@ -219,9 +135,10 @@ dev.echo/
 | **IPC Server** | `ipc/server.py` | Asyncio Unix socket server |
 | **Protocol** | `ipc/protocol.py` | Message protocol definitions |
 | **TranscriptionEngine** | `transcription/engine.py` | MLX-Whisper transcription |
-| **TranscriptionService** | `transcription/service.py` | Audio buffering + transcription |
+| **TranscriptionService** | `transcription/service.py` | Audio buffering + transcription + aggregation |
 | **LocalLLMAgent** | `llm/agent.py` | Strands Agent with Ollama/Llama |
 | **LLMService** | `llm/service.py` | LLM service layer for IPC |
+| **KnowledgeBaseManager** | `kb/manager.py` | KB document operations (list, add, update, remove) |
 | **Backend Main** | `main.py` | Backend entry point |
 
 ## Type Definitions

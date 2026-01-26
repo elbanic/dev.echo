@@ -13,6 +13,7 @@ enum Command: Equatable {
     case quick(content: String)                 // /quick {contents} - Query local LLM
     case stop                                   // /stop - Stop audio capture
     case save                                   // /save - Save transcript
+    case mic                                    // /mic - Toggle microphone capture
     
     // KB Management Mode
     case list                                   // /list - List KB documents
@@ -41,6 +42,8 @@ extension Command: CustomStringConvertible {
             return "/stop"
         case .save:
             return "/save"
+        case .mic:
+            return "/mic"
         case .list:
             return "/list"
         case .remove(let name):

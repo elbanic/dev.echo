@@ -27,6 +27,12 @@ final class AudioCaptureEngine: AudioCaptureDelegate {
     private(set) var systemAudioStatus: CaptureStatus = .inactive
     private(set) var microphoneStatus: CaptureStatus = .inactive
     
+    /// Whether microphone capture is enabled (can be toggled by user)
+    private(set) var microphoneEnabled: Bool = true
+    
+    /// Reference to microphone capture for toggle functionality
+    private var micCaptureRef: MicrophoneCapture { micCapture }
+    
     init(ipcClient: IPCClient, debug: Bool = false) {
         self.systemCapture = SystemAudioCapture(debug: debug)
         self.micCapture = MicrophoneCapture(debug: debug)
@@ -158,6 +164,41 @@ final class AudioCaptureEngine: AudioCaptureDelegate {
     /// Check if any capture is active
     var isCapturing: Bool {
         systemAudioStatus == .active || microphoneStatus == .active
+    }
+    
+    /// Toggle microphone capture on/off
+    /// Returns the new enabled state
+    @discardableResult
+    func toggleMicrophone() async -> Bool {
+        microphoneEnabled.toggle()
+        
+        if microphoneEnabled {
+            // Re-enable microphone capture
+            let hasPermission = micCapture.checkPermission()
+            if hasPermission {
+                do {
+                    try micCapture.startCapture()
+                    microphoneStatus = .active
+                    onStatusUpdate?(.microphone, .active)
+                    logger.info("Microphone capture enabled")
+                } catch {
+                    logger.error("Failed to restart microphone: \(error.localizedDescription)")
+                    microphoneEnabled = false
+                    onError?(error as? AudioCaptureError ?? .captureFailure(underlying: error))
+                }
+            } else {
+                logger.warning("Microphone permission not granted")
+                microphoneEnabled = false
+            }
+        } else {
+            // Disable microphone capture
+            micCapture.stopCapture()
+            microphoneStatus = .inactive
+            onStatusUpdate?(.microphone, .inactive)
+            logger.info("Microphone capture disabled")
+        }
+        
+        return microphoneEnabled
     }
     
     // MARK: - AudioCaptureDelegate

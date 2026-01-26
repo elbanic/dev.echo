@@ -9,12 +9,30 @@ import asyncio
 import logging
 import signal
 import sys
+from pathlib import Path
 from typing import Optional
 
 from ipc.server import IPCServer
-from ipc.protocol import AudioDataMessage, TranscriptionMessage, LLMQueryMessage, LLMResponseMessage
+from ipc.protocol import (
+    AudioDataMessage,
+    TranscriptionMessage,
+    LLMQueryMessage,
+    LLMResponseMessage,
+    KBAddMessage,
+    KBUpdateMessage,
+    KBRemoveMessage,
+    KBListResponseMessage,
+    KBResponseMessage,
+)
 from transcription import TranscriptionService, TranscriptionResult
 from llm import LLMService, OllamaUnavailableError, LLMError
+from kb import (
+    KnowledgeBaseManager,
+    DocumentNotFoundError,
+    InvalidMarkdownError,
+    DocumentExistsError,
+    KBError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +48,7 @@ class DevEchoBackend:
         self.ipc_server = IPCServer(socket_path)
         self.transcription_service = TranscriptionService()
         self.llm_service = LLMService()
+        self.kb_manager = KnowledgeBaseManager()
         self._running = False
     
     async def start(self) -> None:
@@ -46,6 +65,12 @@ class DevEchoBackend:
         
         # Set up LLM query handler
         self.ipc_server.on_llm_query(self._on_llm_query)
+        
+        # Set up KB handlers
+        self.ipc_server.on_kb_list(self._on_kb_list)
+        self.ipc_server.on_kb_add(self._on_kb_add)
+        self.ipc_server.on_kb_update(self._on_kb_update)
+        self.ipc_server.on_kb_remove(self._on_kb_remove)
         
         # Start services
         await self.transcription_service.start()
@@ -132,6 +157,140 @@ class DevEchoBackend:
                 content=f"Error: {str(e)}",
                 model="error",
                 tokens_used=0
+            )
+    
+    async def _on_kb_list(self) -> KBListResponseMessage:
+        """
+        Handle KB list request.
+        
+        Requirements: 4.1 - Display all documents in knowledge base
+        """
+        logger.info("Received KB list request")
+        
+        try:
+            documents = await self.kb_manager.list_documents()
+            doc_dicts = [doc.to_dict() for doc in documents]
+            
+            return KBListResponseMessage(documents=doc_dicts)
+            
+        except Exception as e:
+            logger.error(f"KB list error: {e}")
+            return KBListResponseMessage(documents=[])
+    
+    async def _on_kb_add(self, message: KBAddMessage) -> KBResponseMessage:
+        """
+        Handle KB add request.
+        
+        Requirements: 4.4, 4.5 - Add markdown file with validation
+        """
+        logger.info(f"Received KB add request: {message.name} from {message.source_path}")
+        
+        try:
+            doc = await self.kb_manager.add_document(
+                source_path=Path(message.source_path),
+                name=message.name
+            )
+            
+            return KBResponseMessage(
+                success=True,
+                message=f"Added document: {doc.name}",
+                document=doc.to_dict()
+            )
+            
+        except InvalidMarkdownError as e:
+            logger.error(f"Invalid markdown: {e}")
+            return KBResponseMessage(
+                success=False,
+                message=str(e),
+                document=None
+            )
+        except DocumentExistsError as e:
+            logger.error(f"Document exists: {e}")
+            return KBResponseMessage(
+                success=False,
+                message=str(e),
+                document=None
+            )
+        except KBError as e:
+            logger.error(f"KB error: {e}")
+            return KBResponseMessage(
+                success=False,
+                message=str(e),
+                document=None
+            )
+    
+    async def _on_kb_update(self, message: KBUpdateMessage) -> KBResponseMessage:
+        """
+        Handle KB update request.
+        
+        Requirements: 4.3 - Update existing document
+        """
+        logger.info(f"Received KB update request: {message.name} from {message.source_path}")
+        
+        try:
+            doc = await self.kb_manager.update_document(
+                source_path=Path(message.source_path),
+                name=message.name
+            )
+            
+            return KBResponseMessage(
+                success=True,
+                message=f"Updated document: {doc.name}",
+                document=doc.to_dict()
+            )
+            
+        except DocumentNotFoundError as e:
+            logger.error(f"Document not found: {e}")
+            return KBResponseMessage(
+                success=False,
+                message=str(e),
+                document=None
+            )
+        except InvalidMarkdownError as e:
+            logger.error(f"Invalid markdown: {e}")
+            return KBResponseMessage(
+                success=False,
+                message=str(e),
+                document=None
+            )
+        except KBError as e:
+            logger.error(f"KB error: {e}")
+            return KBResponseMessage(
+                success=False,
+                message=str(e),
+                document=None
+            )
+    
+    async def _on_kb_remove(self, message: KBRemoveMessage) -> KBResponseMessage:
+        """
+        Handle KB remove request.
+        
+        Requirements: 4.2 - Delete document with specified filename
+        """
+        logger.info(f"Received KB remove request: {message.name}")
+        
+        try:
+            await self.kb_manager.remove_document(name=message.name)
+            
+            return KBResponseMessage(
+                success=True,
+                message=f"Removed document: {message.name}",
+                document=None
+            )
+            
+        except DocumentNotFoundError as e:
+            logger.error(f"Document not found: {e}")
+            return KBResponseMessage(
+                success=False,
+                message=str(e),
+                document=None
+            )
+        except KBError as e:
+            logger.error(f"KB error: {e}")
+            return KBResponseMessage(
+                success=False,
+                message=str(e),
+                document=None
             )
 
 

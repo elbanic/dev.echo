@@ -34,7 +34,7 @@ enum ApplicationMode: Equatable {
         case .command:
             return [.new, .managekb, .quit]
         case .transcribing:
-            return [.chat, .quick, .stop, .save, .quit]
+            return [.chat, .quick, .stop, .save, .mic, .quit]
         case .knowledgeBaseManagement:
             return [.list, .add, .update, .remove, .quit]
         }
@@ -91,7 +91,7 @@ enum ApplicationMode: Equatable {
 /// Command type identifier for mode validation
 enum CommandType: Hashable {
     case new, managekb, quit
-    case chat, quick, stop, save
+    case chat, quick, stop, save, mic
     case list, add, update, remove
     case unknown
 }
@@ -107,6 +107,7 @@ extension Command {
         case .quick: return .quick
         case .stop: return .stop
         case .save: return .save
+        case .mic: return .mic
         case .list: return .list
         case .add: return .add
         case .update: return .update

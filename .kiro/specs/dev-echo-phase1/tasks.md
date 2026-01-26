@@ -138,12 +138,12 @@ This implementation plan covers the core CLI application with audio capture, tra
     - **Property 9: Markdown Transcript Format**
     - **Validates: Requirements 8.2**
 
-- [ ] 11. Implement Knowledge Base Manager (Python)
-  - [ ] 11.1 Create KnowledgeBaseManager class
+- [x] 11. Implement Knowledge Base Manager (Python)
+  - [x] 11.1 Create KnowledgeBaseManager class
     - Initialize with KB storage path
     - Implement list_documents method
     - _Requirements: 4.1_
-  - [ ] 11.2 Implement document operations (add, update, remove)
+  - [x] 11.2 Implement document operations (add, update, remove)
     - Validate markdown files
     - Handle file operations
     - _Requirements: 4.2, 4.3, 4.4, 4.5_
@@ -154,7 +154,7 @@ This implementation plan covers the core CLI application with audio capture, tra
     - **Property 11: KB Document Round-Trip**
     - **Validates: Requirements 4.1, 4.2, 4.4**
 
-- [ ] 12. Checkpoint - Backend services
+- [x] 12. Checkpoint - Backend services
   - Ensure all tests pass, ask the user if questions arise.
 
 - [x] 13. Wire components together
@@ -176,7 +176,7 @@ This implementation plan covers the core CLI application with audio capture, tra
     - **Property 13: Status Update Reactivity**
     - **Validates: Requirements 9.5**
 
-- [ ] 14. Final checkpoint
+- [x] 14. Final checkpoint
   - Ensure all tests pass, ask the user if questions arise.
   - Verify all requirements are covered
   - Test end-to-end workflows

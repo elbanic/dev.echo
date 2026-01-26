@@ -7,6 +7,7 @@ Handles audio buffering and source tracking.
 
 import asyncio
 import logging
+import re
 import time
 from collections import defaultdict
 from typing import Callable, Optional, Awaitable
@@ -14,6 +15,37 @@ from typing import Callable, Optional, Awaitable
 from .engine import TranscriptionEngine, TranscriptionResult, AudioSource
 
 logger = logging.getLogger(__name__)
+
+
+def is_hallucination(text: str) -> bool:
+    """Check if text appears to be a Whisper hallucination."""
+    if not text or len(text.strip()) < 2:
+        return True
+    
+    # Check for special tokens like <|bn|>, <|en|>
+    if re.search(r'<\|[a-z]+\|>', text):
+        return True
+    
+    # Check for excessive repetition (same word/phrase repeated many times)
+    words = text.split()
+    if len(words) >= 4:
+        unique_ratio = len(set(words)) / len(words)
+        if unique_ratio < 0.2:  # Less than 20% unique words
+            return True
+    
+    # Check for common hallucination phrases
+    lower_text = text.lower().strip()
+    hallucination_phrases = [
+        'thank you',
+        'thanks for watching',
+        'subscribe',
+        'like and subscribe',
+    ]
+    for phrase in hallucination_phrases:
+        if lower_text == phrase or lower_text == f'{phrase}.':
+            return True
+    
+    return False
 
 
 class TranscriptionService:
@@ -24,10 +56,13 @@ class TranscriptionService:
     sufficient audio has accumulated. Maintains separate buffers
     for system audio and microphone input.
     
+    Transcription results are sent immediately to Swift client,
+    which handles display aggregation for better UX.
+    
     Requirements: 6.1, 6.2, 6.3, 6.4
     """
     
-    # Buffer settings
+    # Audio buffer settings
     SAMPLE_RATE = 16000
     BUFFER_DURATION_SECONDS = 2.0  # Transcribe every 2 seconds of audio
     MIN_BUFFER_SAMPLES = int(SAMPLE_RATE * 0.5)  # Minimum 0.5 seconds
@@ -47,7 +82,7 @@ class TranscriptionService:
         self.engine = engine or TranscriptionEngine()
         self._on_transcription = on_transcription
         
-        # Separate buffers for each audio source
+        # Separate audio buffers for each audio source
         self._buffers: dict[AudioSource, list[float]] = defaultdict(list)
         self._buffer_timestamps: dict[AudioSource, float] = {}
         self._lock = asyncio.Lock()
@@ -162,6 +197,8 @@ class TranscriptionService:
         """
         Transcribe a buffer of audio samples.
         
+        Sends results immediately to callback (Swift handles display aggregation).
+        
         Requirements: 6.1, 6.2, 6.4
         """
         try:
@@ -169,6 +206,11 @@ class TranscriptionService:
             result = await self.engine.transcribe(samples, source, timestamp)
             
             if result.text:
+                # Filter hallucinations
+                if is_hallucination(result.text):
+                    logger.debug(f"[{source.value}] Filtered hallucination: {result.text[:50]}...")
+                    return
+                
                 logger.info(f"[{source.value}] {result.text}")
                 if self._on_transcription:
                     await self._on_transcription(result)

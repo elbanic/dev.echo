@@ -18,6 +18,13 @@ from .protocol import (
     TranscriptionMessage,
     LLMQueryMessage,
     LLMResponseMessage,
+    KBListMessage,
+    KBListResponseMessage,
+    KBAddMessage,
+    KBUpdateMessage,
+    KBRemoveMessage,
+    KBResponseMessage,
+    KBErrorMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +44,10 @@ class IPCServer:
         # Message handlers
         self._audio_handler: Optional[Callable[[AudioDataMessage], Awaitable[None]]] = None
         self._llm_query_handler: Optional[Callable[[LLMQueryMessage], Awaitable[LLMResponseMessage]]] = None
+        self._kb_list_handler: Optional[Callable[[], Awaitable[KBListResponseMessage]]] = None
+        self._kb_add_handler: Optional[Callable[[KBAddMessage], Awaitable[KBResponseMessage]]] = None
+        self._kb_update_handler: Optional[Callable[[KBUpdateMessage], Awaitable[KBResponseMessage]]] = None
+        self._kb_remove_handler: Optional[Callable[[KBRemoveMessage], Awaitable[KBResponseMessage]]] = None
     
     def on_audio_data(self, handler: Callable[[AudioDataMessage], Awaitable[None]]):
         """Register handler for audio data messages."""
@@ -45,6 +56,22 @@ class IPCServer:
     def on_llm_query(self, handler: Callable[[LLMQueryMessage], Awaitable[LLMResponseMessage]]):
         """Register handler for LLM query messages."""
         self._llm_query_handler = handler
+    
+    def on_kb_list(self, handler: Callable[[], Awaitable[KBListResponseMessage]]):
+        """Register handler for KB list messages."""
+        self._kb_list_handler = handler
+    
+    def on_kb_add(self, handler: Callable[[KBAddMessage], Awaitable[KBResponseMessage]]):
+        """Register handler for KB add messages."""
+        self._kb_add_handler = handler
+    
+    def on_kb_update(self, handler: Callable[[KBUpdateMessage], Awaitable[KBResponseMessage]]):
+        """Register handler for KB update messages."""
+        self._kb_update_handler = handler
+    
+    def on_kb_remove(self, handler: Callable[[KBRemoveMessage], Awaitable[KBResponseMessage]]):
+        """Register handler for KB remove messages."""
+        self._kb_remove_handler = handler
     
     async def send_transcription(self, transcription: TranscriptionMessage):
         """Send transcription result to all connected clients."""
@@ -166,6 +193,33 @@ class IPCServer:
             if self._llm_query_handler:
                 query_msg = LLMQueryMessage.from_payload(message.payload)
                 response = await self._llm_query_handler(query_msg)
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+        
+        elif message.type == MessageType.KB_LIST:
+            if self._kb_list_handler:
+                response = await self._kb_list_handler()
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+        
+        elif message.type == MessageType.KB_ADD:
+            if self._kb_add_handler:
+                add_msg = KBAddMessage.from_payload(message.payload)
+                response = await self._kb_add_handler(add_msg)
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+        
+        elif message.type == MessageType.KB_UPDATE:
+            if self._kb_update_handler:
+                update_msg = KBUpdateMessage.from_payload(message.payload)
+                response = await self._kb_update_handler(update_msg)
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+        
+        elif message.type == MessageType.KB_REMOVE:
+            if self._kb_remove_handler:
+                remove_msg = KBRemoveMessage.from_payload(message.payload)
+                response = await self._kb_remove_handler(remove_msg)
                 writer.write(response.to_ipc_message().to_json().encode() + b"\n")
                 await writer.drain()
         

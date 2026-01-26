@@ -108,3 +108,41 @@ class TestTranscriptionEngine:
         assert abs(result[0]) < 0.001  # ~0
         assert abs(result[1] - 0.5) < 0.001  # ~0.5
         assert abs(result[2] + 0.5) < 0.001  # ~-0.5
+
+
+# Import hallucination filter for testing
+from transcription.service import is_hallucination
+
+
+class TestHallucinationFilter:
+    """Tests for hallucination detection."""
+    
+    def test_special_tokens_detected(self):
+        """Test that special tokens are detected as hallucination."""
+        assert is_hallucination("<|bn|> some text")
+        assert is_hallucination("text <|en|>")
+    
+    def test_repeated_phrases_detected(self):
+        """Test that repeated phrases are detected."""
+        # Same word repeated many times (needs >4 words and <20% unique)
+        assert is_hallucination("Hannan Hannan Hannan Hannan Hannan Hannan")
+        # 2 unique / 12 words = 16.7% < 20%
+        assert is_hallucination("throughout me throughout me throughout me throughout me throughout me throughout me")
+    
+    def test_thank_you_hallucination(self):
+        """Test common hallucination phrases."""
+        assert is_hallucination("Thank you")
+        assert is_hallucination("Thank you.")
+        assert is_hallucination("thanks for watching")
+    
+    def test_normal_text_passes(self):
+        """Test that normal text is not flagged."""
+        assert not is_hallucination("Hello, how are you today?")
+        assert not is_hallucination("Let's discuss the API design.")
+        assert not is_hallucination("I think we should use REST.")
+    
+    def test_empty_text_filtered(self):
+        """Test that empty or very short text is filtered."""
+        assert is_hallucination("")
+        assert is_hallucination(" ")
+        assert is_hallucination("a")

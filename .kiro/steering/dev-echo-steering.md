@@ -48,3 +48,8 @@ python main.py                 # Run backend server
 pytest                         # Python tests (in backend/)
 swift test                     # Swift tests
 ```
+
+## Documentation rule
+- Add details on how it was implemented to KIRO.md.
+- If the existing method is changed, KIRO.md should also be updated.
+- Do not update implementation progress in KIRO.md

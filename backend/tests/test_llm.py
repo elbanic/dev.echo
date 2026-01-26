@@ -99,7 +99,7 @@ class TestLocalLLMAgent:
     def test_default_configuration(self):
         """Test LocalLLMAgent default configuration."""
         agent = LocalLLMAgent()
-        assert agent.model_name == "llama3.2"
+        assert agent.model_name == "llama3.2:3b"
         assert agent.host == "http://localhost:11434"
         assert agent.timeout == 60.0
     
@@ -153,7 +153,7 @@ class TestLLMService:
     def test_default_configuration(self):
         """Test LLMService default configuration."""
         service = LLMService()
-        assert service.agent.model_name == "llama3.2"
+        assert service.agent.model_name == "llama3.2:3b"
     
     def test_custom_configuration(self):
         """Test LLMService with custom configuration."""

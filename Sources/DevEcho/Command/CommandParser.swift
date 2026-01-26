@@ -59,6 +59,9 @@ struct CommandParser: CommandParserProtocol {
         case "/save":
             return .save
             
+        case "/mic":
+            return .mic
+            
         // KB Management Mode commands
         case "/list":
             return .list

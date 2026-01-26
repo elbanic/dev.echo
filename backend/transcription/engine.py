@@ -65,7 +65,7 @@ class TranscriptionEngine:
     Requirements: 6.1, 6.2
     """
     
-    DEFAULT_MODEL = "mlx-community/whisper-base-mlx"
+    DEFAULT_MODEL = "mlx-community/whisper-large-v3-mlx"
     SAMPLE_RATE = 16000  # Expected input sample rate
     
     def __init__(self, model_name: Optional[str] = None):
