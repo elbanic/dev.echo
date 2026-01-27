@@ -113,7 +113,8 @@ class SimpleCloudAgent:
         self,
         model_id: str = DEFAULT_MODEL,
         region: str = "us-west-2",
-        timeout: float = DEFAULT_TIMEOUT
+        timeout: float = DEFAULT_TIMEOUT,
+        debug: bool = False
     ):
         """
         Initialize SimpleCloudAgent.
@@ -122,10 +123,12 @@ class SimpleCloudAgent:
             model_id: Bedrock model ID (default: Claude Sonnet)
             region: AWS region
             timeout: Query timeout in seconds
+            debug: If True, show agent stdout output
         """
         self.model_id = model_id
         self.region = region
         self.timeout = timeout
+        self.debug = debug
         self._agent: Optional[Agent] = None
         self._initialized = False
     
@@ -254,7 +257,17 @@ Be concise and helpful. Focus on actionable information."""
             # Use Strands Agent to process the query
             # Run in executor to avoid blocking
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self._agent, prompt)
+            
+            if self.debug:
+                # Debug mode: show agent stdout
+                result = await loop.run_in_executor(None, self._agent, prompt)
+            else:
+                # Normal mode: suppress stdout to prevent mixing with CLI
+                result = await loop.run_in_executor(
+                    None, 
+                    self._execute_agent_silent, 
+                    prompt
+                )
             
             # Extract response content
             content = str(result)
@@ -277,6 +290,19 @@ Be concise and helpful. Focus on actionable information."""
             elif "throttl" in error_str:
                 raise CloudLLMError("Request throttled. Please try again later.")
             raise
+    
+    def _execute_agent_silent(self, prompt: str):
+        """Execute agent with stdout suppressed."""
+        import sys
+        import io
+        
+        # Capture stdout to prevent agent streaming output
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            return self._agent(prompt)
+        finally:
+            sys.stdout = old_stdout
     
     def _estimate_tokens(self, prompt: str, response: str) -> int:
         """Rough token estimation."""
@@ -370,7 +396,8 @@ class RAGCloudAgent:
         region: str = "us-west-2",
         timeout: float = DEFAULT_TIMEOUT,
         retrieval_top_k: int = 5,
-        min_score: float = 0.4
+        min_score: float = 0.4,
+        debug: bool = False
     ):
         """
         Initialize RAGCloudAgent.
@@ -382,6 +409,7 @@ class RAGCloudAgent:
             timeout: Query timeout in seconds
             retrieval_top_k: Maximum number of documents to retrieve
             min_score: Minimum relevance score for retrieval
+            debug: If True, show agent stdout output
         """
         self.knowledge_base_id = knowledge_base_id
         self.model_id = model_id
@@ -389,6 +417,7 @@ class RAGCloudAgent:
         self.timeout = timeout
         self.retrieval_top_k = retrieval_top_k
         self.min_score = min_score
+        self.debug = debug
         self._agent: Optional[Agent] = None
         self._initialized = False
     
@@ -550,7 +579,17 @@ When you use information from the knowledge base, mention which document it came
             
             # Step 3: Generate response via agent
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, self._agent, full_context)
+            
+            if self.debug:
+                # Debug mode: show agent stdout
+                response = await loop.run_in_executor(None, self._agent, full_context)
+            else:
+                # Normal mode: suppress stdout to prevent mixing with CLI
+                response = await loop.run_in_executor(
+                    None, 
+                    self._execute_agent_silent, 
+                    full_context
+                )
             
             # Extract sources from retrieval result
             sources = self._extract_sources(retrieval_result)
@@ -573,6 +612,19 @@ When you use information from the knowledge base, mention which document it came
             elif "throttl" in error_str:
                 raise CloudLLMError("Request throttled. Please try again later.")
             raise
+    
+    def _execute_agent_silent(self, prompt: str):
+        """Execute agent with stdout suppressed."""
+        import sys
+        import io
+        
+        # Capture stdout to prevent agent streaming output
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            return self._agent(prompt)
+        finally:
+            sys.stdout = old_stdout
     
     async def _retrieve_from_kb(self, query: str) -> Optional[dict]:
         """
@@ -868,7 +920,8 @@ class CloudLLMService:
         self,
         knowledge_base_id: str,
         model_id: str = RAGCloudAgent.DEFAULT_MODEL,
-        region: str = "us-west-2"
+        region: str = "us-west-2",
+        debug: bool = False
     ):
         """
         Initialize CloudLLMService.
@@ -877,19 +930,23 @@ class CloudLLMService:
             knowledge_base_id: Bedrock Knowledge Base ID
             model_id: Bedrock model ID (default: Claude Sonnet)
             region: AWS region
+            debug: If True, show agent stdout output
         """
         self.knowledge_base_id = knowledge_base_id
         self.model_id = model_id
         self.region = region
+        self.debug = debug
         
         self.simple_agent = SimpleCloudAgent(
             model_id=model_id,
-            region=region
+            region=region,
+            debug=debug
         )
         self.rag_agent = RAGCloudAgent(
             knowledge_base_id=knowledge_base_id,
             model_id=model_id,
-            region=region
+            region=region,
+            debug=debug
         )
         self.classifier = IntentClassifier()
         self._initialized = False

@@ -196,20 +196,15 @@ start_backend() {
     # Activate venv and start backend
     cd "$BACKEND_DIR"
     
-    local backend_args=""
-    if [[ "$DEBUG_MODE" == true ]]; then
-        backend_args="--debug"
-    fi
-    
     # Start backend in background
     source "$VENV_DIR/bin/activate"
     
     if [[ "$DEBUG_MODE" == true ]]; then
-        # Debug mode: show all output
-        python main.py $backend_args &
+        # Debug mode: show all output, set log level to DEBUG
+        DEVECHO_LOG_LEVEL=DEBUG python main.py &
     else
         # Normal mode: suppress MLX-Whisper progress bars (stderr)
-        python main.py $backend_args 2>/dev/null &
+        python main.py 2>/dev/null &
     fi
     BACKEND_PID=$!
     

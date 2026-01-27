@@ -90,16 +90,59 @@ swift run dev.echo
 | KB | `/remove {name}` | Remove document |
 | KB | `/sync` | Trigger KB sync |
 
-## AWS Configuration (Phase 2)
+## AWS Configuration (Optional feature, Cloud LLM with RAG, S3-based Knowledge Base)
+
+### Creating `.env.dev` File
+
+Create `backend/.env.dev` with your AWS settings:
 
 ```bash
-export AWS_REGION="your-knowledgebase-region"                    # AWS region (default: us-west-2)
-export DEVECHO_S3_BUCKET="your-bucket-name"      # S3 bucket for KB documents
-export DEVECHO_S3_PREFIX="kb-documents/"         # S3 key prefix (default: kb-documents/)
-export DEVECHO_KB_ID="your-knowledge-base-id"    # Bedrock Knowledge Base ID
-export DEVECHO_KB_DS_ID="your-data-source-id"    # Bedrock KB Data Source ID (for sync)
-export DEVECHO_BEDROCK_MODEL="us.anthropic.claude-sonnet-4-20250514-v1:0"  # Bedrock model ID
+# backend/.env.dev
+# DevEcho Development Environment Configuration
+
+# AWS Region (required for Phase 2)
+export AWS_REGION="us-east-1"
+
+# S3 bucket for Knowledge Base documents (required for Phase 2)
+export DEVECHO_S3_BUCKET="your-bucket-name"
+
+# S3 key prefix for documents (optional, default: kb-documents/)
+export DEVECHO_S3_PREFIX="kb-documents/"
+
+# Bedrock Knowledge Base ID (required for Phase 2)
+export DEVECHO_KB_ID="your-knowledge-base-id"
+
+# Bedrock KB Data Source ID (required for /sync command)
+export DEVECHO_KB_DS_ID="your-data-source-id"
+
+# Bedrock model ID (optional, default: Claude Sonnet)
+export DEVECHO_BEDROCK_MODEL="us.anthropic.claude-sonnet-4-20250514-v1:0"
+
+# Backend log level (optional, default: INFO)
+# Set to DEBUG for verbose logging
+# export DEVECHO_LOG_LEVEL="DEBUG"
 ```
+
+### Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AWS_REGION` | Yes* | us-west-2 | AWS region for Bedrock and S3 |
+| `DEVECHO_S3_BUCKET` | Yes* | - | S3 bucket name for KB documents |
+| `DEVECHO_S3_PREFIX` | No | kb-documents/ | S3 key prefix for documents |
+| `DEVECHO_KB_ID` | Yes* | - | Bedrock Knowledge Base ID |
+| `DEVECHO_KB_DS_ID` | No | - | Bedrock KB Data Source ID (for sync) |
+| `DEVECHO_BEDROCK_MODEL` | No | Claude Sonnet | Bedrock model ID |
+| `DEVECHO_LOG_LEVEL` | No | INFO | Log level (DEBUG, INFO, WARNING, ERROR) |
+
+*Required only for Phase 2 features. Without these, dev.echo runs in Phase 1 (local) mode.
+
+### AWS Prerequisites
+
+1. **AWS CLI configured**: Run `aws configure` with valid credentials
+2. **S3 bucket**: Create a bucket for KB documents
+3. **Bedrock Knowledge Base**: Create a KB with S3 data source pointing to your bucket
+4. **IAM permissions**: Ensure your credentials have access to S3, Bedrock, and Bedrock Agent Runtime
 
 ## Usage Examples
 

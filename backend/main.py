@@ -8,10 +8,43 @@ Supports both Phase 1 (local) and Phase 2 (cloud) services.
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
 from typing import Optional, Union
+
+
+def setup_logging():
+    """
+    Configure logging for the backend.
+    
+    Sets up logging format and suppresses verbose logs from external libraries
+    (strands, boto3, etc.) to keep the output clean.
+    """
+    # Get log level from environment variable (default: INFO)
+    log_level_str = os.getenv("DEVECHO_LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, log_level_str, logging.INFO)
+    
+    # Set up basic logging format
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S"
+    )
+    
+    # Suppress verbose logs from external libraries
+    logging.getLogger("strands").setLevel(logging.WARNING)
+    logging.getLogger("strands_tools").setLevel(logging.WARNING)
+    logging.getLogger("boto3").setLevel(logging.WARNING)
+    logging.getLogger("botocore").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+# Initialize logging before importing other modules
+setup_logging()
 
 from ipc.server import IPCServer
 from ipc.protocol import (
@@ -44,12 +77,39 @@ from kb import (
     KBError,
 )
 
-# Phase 2 imports
-from aws.config import AWSConfig
-from aws.s3_manager import S3DocumentManager
-from aws.kb_service import KnowledgeBaseService
-from aws.agents import CloudLLMService
-from aws.handlers import CloudLLMHandler, S3KBHandler, KBSyncHandler
+# Phase 2 imports - lazy loaded to avoid boto3 credential lookup blocking
+# when AWS is not configured
+AWSConfig = None
+S3DocumentManager = None
+KnowledgeBaseService = None
+CloudLLMService = None
+CloudLLMHandler = None
+S3KBHandler = None
+KBSyncHandler = None
+
+
+def _load_phase2_imports():
+    """Lazy load Phase 2 imports to avoid boto3 blocking on startup."""
+    global AWSConfig, S3DocumentManager, KnowledgeBaseService
+    global CloudLLMService, CloudLLMHandler, S3KBHandler, KBSyncHandler
+    
+    from aws.config import AWSConfig as _AWSConfig
+    from aws.s3_manager import S3DocumentManager as _S3DocumentManager
+    from aws.kb_service import KnowledgeBaseService as _KnowledgeBaseService
+    from aws.agents import CloudLLMService as _CloudLLMService
+    from aws.handlers import (
+        CloudLLMHandler as _CloudLLMHandler,
+        S3KBHandler as _S3KBHandler,
+        KBSyncHandler as _KBSyncHandler,
+    )
+    
+    AWSConfig = _AWSConfig
+    S3DocumentManager = _S3DocumentManager
+    KnowledgeBaseService = _KnowledgeBaseService
+    CloudLLMService = _CloudLLMService
+    CloudLLMHandler = _CloudLLMHandler
+    S3KBHandler = _S3KBHandler
+    KBSyncHandler = _KBSyncHandler
 
 logger = logging.getLogger(__name__)
 
@@ -92,17 +152,32 @@ class DevEchoBackend:
         Returns:
             True if Phase 2 services are initialized successfully
         """
+        import os
+        
+        # Quick check for required environment variables BEFORE importing AWS modules
+        # This avoids boto3 credential lookup blocking when AWS is not configured
+        required_vars = ["DEVECHO_S3_BUCKET", "DEVECHO_KB_ID"]
+        missing = [v for v in required_vars if not os.getenv(v)]
+        
+        if missing:
+            logger.info(
+                f"Phase 2 services not configured. Missing: {', '.join(missing)}. "
+                "Using Phase 1 (local) services only."
+            )
+            return False
+        
+        # Now safe to load Phase 2 imports (AWS modules)
+        _load_phase2_imports()
+        
         try:
             # Load AWS configuration
             self._aws_config = AWSConfig.from_env()
             
-            # Check if AWS is configured
-            is_valid, missing = self._aws_config.validate()
+            # Validate configuration (should pass since we checked env vars above)
+            is_valid, _ = self._aws_config.validate()
             if not is_valid:
-                logger.info(
-                    f"Phase 2 services not configured. Missing: {', '.join(missing)}. "
-                    "Using Phase 1 (local) services only."
-                )
+                # This shouldn't happen, but handle gracefully
+                logger.warning("AWS config validation failed unexpectedly")
                 return False
             
             logger.info("Initializing Phase 2 AWS services...")
@@ -124,11 +199,15 @@ class DevEchoBackend:
                 region=self._aws_config.aws_region,
             )
             
+            # Check if debug mode is enabled
+            is_debug = os.getenv("DEVECHO_LOG_LEVEL", "INFO").upper() == "DEBUG"
+            
             # Initialize Cloud LLM Service
             self._cloud_llm_service = CloudLLMService(
                 knowledge_base_id=self._aws_config.knowledge_base_id,
                 model_id=self._aws_config.bedrock_model_id,
                 region=self._aws_config.aws_region,
+                debug=is_debug,
             )
             
             # Initialize handlers

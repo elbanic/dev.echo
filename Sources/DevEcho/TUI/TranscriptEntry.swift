@@ -166,12 +166,16 @@ struct Transcript: Identifiable {
     // MARK: - Markdown Export
     
     /// Convert transcript to markdown format
+    /// Format: 🔊 [HH:mm:ss] text content
     func toMarkdown() -> String {
         var markdown = "# Transcript\n\n"
         
         // Header with session info
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm:ss"
         
         markdown += "**Session Start:** \(dateFormatter.string(from: startTime))\n"
         if let end = endTime {
@@ -186,12 +190,15 @@ struct Transcript: Identifiable {
         var allItems: [(date: Date, markdown: String)] = []
         
         for entry in entries {
-            let line = "**[\(entry.markdownTimestamp)]** \(entry.speakerLabel)\n\n\(entry.text)\n"
+            let icon = entry.source == .system ? "🔊" : "🎤"
+            let time = timeFormatter.string(from: entry.timestamp)
+            let line = "\(icon) [\(time)] \(entry.text)"
             allItems.append((entry.timestamp, line))
         }
         
         for response in llmResponses {
-            let line = "**[\(response.markdownTimestamp)]** 🤖 LLM (\(response.model))\n\n\(response.content)\n"
+            let time = timeFormatter.string(from: response.timestamp)
+            let line = "🤖 [\(time)] (\(response.model))\n\(response.content)"
             allItems.append((response.timestamp, line))
         }
         

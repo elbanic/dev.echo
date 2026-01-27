@@ -133,11 +133,20 @@ final class Application {
     
     // MARK: - Main Loop
     
+    // Flag to skip status bar in main loop when transitioning to transcribing mode
+    private var skipNextStatusBar = false
+    
     func run() {
         showWelcome()
         
         while isRunning {
-            printStatusAndPrompt()
+            if !skipNextStatusBar {
+                printStatusAndPrompt()
+            } else {
+                skipNextStatusBar = false
+                print("❯ ", terminator: "")
+                fflush(stdout)
+            }
             
             let input = inputHandler.readInput()
             
@@ -158,10 +167,22 @@ final class Application {
     
     private func printStatusAndPrompt() {
         print(renderer.separator)
+        
+        // Get audio status directly from engine if available
+        var audioStatus = tui.statusBar.audioStatus
+        var micStatus = tui.statusBar.micStatus
+        
+        if #available(macOS 13.0, *) {
+            if let engine = audioEngine as? AudioCaptureEngine {
+                audioStatus = engine.systemAudioStatus
+                micStatus = engine.microphoneStatus
+            }
+        }
+        
         let statusLine = renderer.buildStatusLine(
             mode: currentMode,
-            audioStatus: tui.statusBar.audioStatus,
-            micStatus: tui.statusBar.micStatus
+            audioStatus: audioStatus,
+            micStatus: micStatus
         )
         print(statusLine)
         print("❯ ", terminator: "")
@@ -219,10 +240,12 @@ final class Application {
         case (.new, .transcribing):
             tui.setMode(.transcribing)
             tui.startNewTranscript()
+            skipNextStatusBar = true  // Skip status bar in main loop, will print after init
             print("🎙️  Transcribing Mode")
             print("   Type /chat or /quick to query LLM with context")
             print("   Type /stop to pause, /save to export, /quit to return\n")
-            startAudioCapture()
+            // Start audio capture - status bar will be printed after all init messages
+            startAudioCapture(showModeHeader: true)
             
         case (.managekb, .knowledgeBaseManagement):
             tui.setMode(.knowledgeBaseManagement)
@@ -307,7 +330,7 @@ final class Application {
 
     // MARK: - Audio Capture
     
-    private func startAudioCapture() {
+    private func startAudioCapture(showModeHeader: Bool = false) {
         if #available(macOS 13.0, *) {
             guard let engine = audioEngine as? AudioCaptureEngine else {
                 print("   ⚠️  Audio engine not available")
@@ -319,31 +342,44 @@ final class Application {
                     do {
                         try await ipcClient.connect()
                         print("\r\u{001B}[K   ✅ Connected to Python backend")
-                        print("❯ \(self.inputHandler.getCurrentInput())", terminator: "")
                         fflush(stdout)
                         startIPCListening()
                         await checkKBConnectivity()
                     } catch {
                         print("\r\u{001B}[K   ⚠️  Python backend not running: \(error.localizedDescription)")
                         print("   💡 Start backend with: cd backend && source .venv/bin/activate && python main.py")
-                        print("❯ \(self.inputHandler.getCurrentInput())", terminator: "")
                         fflush(stdout)
                     }
                     
                     let permissions = await engine.requestPermissions()
                     if !permissions.screenCapture {
                         print("\r\u{001B}[K   ⚠️  Screen capture permission required for system audio")
-                        print("❯ \(self.inputHandler.getCurrentInput())", terminator: "")
                         fflush(stdout)
                     }
                     if !permissions.microphone {
                         print("\r\u{001B}[K   ⚠️  Microphone permission required")
-                        print("❯ \(self.inputHandler.getCurrentInput())", terminator: "")
                         fflush(stdout)
                     }
                     
                     try await engine.startCapture()
+                    
+                    // Update statusBar with engine's actual status
+                    self.tui.statusBar.setAudioStatus(engine.systemAudioStatus)
+                    self.tui.statusBar.setMicStatus(engine.microphoneStatus)
+                    
                     print("\r\u{001B}[K   ✅ Audio capture started")
+                    fflush(stdout)
+                    
+                    // Print status bar after all initialization is complete
+                    if showModeHeader {
+                        print(self.renderer.separator)
+                        let statusLine = self.renderer.buildStatusLine(
+                            mode: .transcribing,
+                            audioStatus: engine.systemAudioStatus,
+                            micStatus: engine.microphoneStatus
+                        )
+                        print(statusLine)
+                    }
                     print("❯ \(self.inputHandler.getCurrentInput())", terminator: "")
                     fflush(stdout)
                 } catch {
@@ -452,6 +488,9 @@ final class Application {
                 return
             }
             
+            // Skip status bar in main loop - we'll print it after mic toggle
+            skipNextStatusBar = true
+            
             Task {
                 let currentlyEnabled = engine.microphoneEnabled
                 let shouldEnable: Bool
@@ -460,7 +499,8 @@ final class Application {
                     shouldEnable = enable
                     if shouldEnable == currentlyEnabled {
                         let state = shouldEnable ? "enabled" : "disabled"
-                        print("\n🎤 Microphone capture already \(state)\n")
+                        print("\n🎤 Microphone capture already \(state)")
+                        self.printCurrentStatusBar()
                         return
                     }
                 } else {
@@ -469,16 +509,38 @@ final class Application {
                 
                 let enabled = await engine.toggleMicrophone()
                 if enabled {
-                    tui.statusBar.setMicStatus(.active)
-                    print("\n🎤 Microphone capture enabled\n")
+                    print("\n🎤 Microphone capture enabled")
                 } else {
-                    tui.statusBar.setMicStatus(.inactive)
-                    print("\n🎤 Microphone capture disabled\n")
+                    print("\n🎤 Microphone capture disabled")
                 }
+                self.printCurrentStatusBar()
             }
         } else {
             print("\n⚠️  Audio capture requires macOS 13.0+\n")
         }
+    }
+    
+    /// Print current status bar with actual engine status
+    private func printCurrentStatusBar() {
+        var audioStatus: CaptureStatus = .inactive
+        var micStatus: CaptureStatus = .inactive
+        
+        if #available(macOS 13.0, *) {
+            if let engine = audioEngine as? AudioCaptureEngine {
+                audioStatus = engine.systemAudioStatus
+                micStatus = engine.microphoneStatus
+            }
+        }
+        
+        print(renderer.separator)
+        let statusLine = renderer.buildStatusLine(
+            mode: currentMode,
+            audioStatus: audioStatus,
+            micStatus: micStatus
+        )
+        print(statusLine)
+        print("❯ \(inputHandler.getCurrentInput())", terminator: "")
+        fflush(stdout)
     }
     
     // MARK: - LLM Query Execution

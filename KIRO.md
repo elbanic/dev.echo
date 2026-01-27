@@ -222,35 +222,83 @@ struct PermissionStatus { var screenCapture: Bool; var microphone: Bool }
 
 ## Build Commands
 ```bash
-# Swift build
-swift build
+# Unified launcher (recommended)
+./scripts/dev-echo              # Start both backend and CLI
+./scripts/dev-echo --debug      # With debug logging
+./scripts/dev-echo --backend-only  # Backend only
+./scripts/dev-echo --cli-only   # CLI only (backend must be running)
 
-# Run dev.echo
-swift run dev.echo
+# Manual execution (if needed)
+swift build                     # Build Swift CLI
+swift run dev.echo              # Run CLI directly
 
-# Run with debug logging
-swift run dev.echo --debug
-
-# Python setup (using venv)
+# Python backend (manual)
 cd backend
 source .venv/bin/activate
-pip install -e ".[dev]"
+python main.py                  # Run backend server
 
-# Run Python backend
-cd backend && source .venv/bin/activate && python main.py
-
-# Run Python backend with debug logging
-cd backend && source .venv/bin/activate && python main.py --debug
-
-# Run Python tests
-cd backend && source .venv/bin/activate && pytest
+# Tests
+cd backend && pytest            # Python tests
+swift test                      # Swift tests
 ```
 
 ## Debug Mode
+
+### CLI Debug Mode
 - **CLI flag**: `--debug` enables verbose logging at startup
 - **Runtime toggle**: Press `Ctrl+B` to toggle debug mode while running
 - **Scope**: Affects IPCClient, AudioCaptureEngine, SystemAudioCapture, MicrophoneCapture
 - **Default**: Debug OFF (only warnings and transcription output shown)
+
+### Backend Debug Mode
+The Python backend debug mode can be enabled in several ways:
+
+1. **Via launcher script (both backend + CLI)**:
+   ```bash
+   ./scripts/dev-echo --debug
+   ```
+   This enables debug mode for both Swift CLI and Python backend.
+
+2. **CLI only debug (backend running separately)**:
+   ```bash
+   # Terminal 1: Start backend normally
+   cd backend && source .venv/bin/activate
+   python main.py
+   
+   # Terminal 2: Start CLI with debug
+   ./scripts/dev-echo --cli-only --debug
+   ```
+
+3. **Backend only debug (CLI running separately)**:
+   ```bash
+   # Terminal 1: Start backend with debug
+   cd backend && source .venv/bin/activate
+   DEVECHO_LOG_LEVEL=DEBUG python main.py
+   
+   # Terminal 2: Start CLI normally
+   ./scripts/dev-echo --cli-only
+   ```
+
+4. **Via `.env.dev` file (always debug for backend)**:
+   Add to `backend/.env.dev`:
+   ```bash
+   export DEVECHO_LOG_LEVEL="DEBUG"
+   ```
+
+Debug mode enables:
+- Detailed logging output from all backend components
+- Cloud LLM Agent streaming output visible in terminal (normally suppressed to prevent duplicate output)
+
+## Backend Logging Configuration
+The Python backend uses a centralized logging setup in `main.py`:
+- **Log level**: Controlled via `DEVECHO_LOG_LEVEL` environment variable (default: INFO)
+- **External library suppression**: Strands, boto3, botocore, urllib3, httpx logs are set to WARNING level to keep output clean
+- **Format**: `HH:MM:SS [LEVEL] module: message`
+
+To enable debug logging for the backend:
+```bash
+DEVECHO_LOG_LEVEL=DEBUG python main.py
+```
 
 ## Requirements
 - macOS 13.0+ (ScreenCaptureKit audio capture)
