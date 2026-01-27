@@ -1,0 +1,292 @@
+#!/bin/bash
+#
+# dev.echo - Unified launcher for Swift CLI and Python backend
+# Usage: dev-echo [--debug] [--backend-only] [--cli-only]
+#
+
+set -e
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+# Get the directory where this script is located (resolves symlinks)
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
+
+# Project root is one level up from scripts/
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# If running from /usr/local/bin symlink, find actual project root
+if [[ "$SCRIPT_DIR" == "/usr/local/bin" ]]; then
+    # Follow the symlink to find the real script location
+    REAL_SCRIPT="$(readlink -f "$0" 2>/dev/null || readlink "$0")"
+    SCRIPT_DIR="$(dirname "$REAL_SCRIPT")"
+    PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+fi
+
+BACKEND_DIR="$PROJECT_ROOT/backend"
+VENV_DIR="$BACKEND_DIR/.venv"
+ENV_FILE="$BACKEND_DIR/.env.dev"
+SOCKET_PATH="/tmp/devecho.sock"
+
+# Process tracking
+BACKEND_PID=""
+CLI_PID=""
+
+# Options
+DEBUG_MODE=false
+BACKEND_ONLY=false
+CLI_ONLY=false
+
+# ============================================================================
+# Colors and Output
+# ============================================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+log_info() {
+    echo -e "${BLUE}[dev.echo]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[dev.echo]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[dev.echo]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[dev.echo]${NC} $1"
+}
+
+# ============================================================================
+# Cleanup Handler
+# ============================================================================
+
+cleanup() {
+    log_info "Shutting down..."
+    
+    # Kill backend if running
+    if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" 2>/dev/null; then
+        log_info "Stopping Python backend (PID: $BACKEND_PID)..."
+        kill "$BACKEND_PID" 2>/dev/null || true
+        wait "$BACKEND_PID" 2>/dev/null || true
+    fi
+    
+    # Kill CLI if running
+    if [[ -n "$CLI_PID" ]] && kill -0 "$CLI_PID" 2>/dev/null; then
+        log_info "Stopping Swift CLI (PID: $CLI_PID)..."
+        kill "$CLI_PID" 2>/dev/null || true
+        wait "$CLI_PID" 2>/dev/null || true
+    fi
+    
+    # Clean up socket file
+    if [[ -S "$SOCKET_PATH" ]]; then
+        rm -f "$SOCKET_PATH"
+    fi
+    
+    log_success "Cleanup complete."
+    exit 0
+}
+
+trap cleanup SIGINT SIGTERM EXIT
+
+# ============================================================================
+# Argument Parsing
+# ============================================================================
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --debug)
+            DEBUG_MODE=true
+            shift
+            ;;
+        --backend-only)
+            BACKEND_ONLY=true
+            shift
+            ;;
+        --cli-only)
+            CLI_ONLY=true
+            shift
+            ;;
+        --help|-h)
+            echo "dev.echo - AI partner for developers"
+            echo ""
+            echo "Usage: dev-echo [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --debug         Enable debug logging for both CLI and backend"
+            echo "  --backend-only  Start only the Python backend server"
+            echo "  --cli-only      Start only the Swift CLI (assumes backend is running)"
+            echo "  --help, -h      Show this help message"
+            echo ""
+            echo "Environment:"
+            echo "  AWS_REGION              AWS region (default: us-east-1)"
+            echo "  DEVECHO_S3_BUCKET       S3 bucket for KB documents"
+            echo "  DEVECHO_KB_ID           Bedrock Knowledge Base ID"
+            echo "  DEVECHO_BEDROCK_MODEL   Bedrock model ID"
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            echo "Use --help for usage information."
+            exit 1
+            ;;
+    esac
+done
+
+# ============================================================================
+# Validation
+# ============================================================================
+
+# Check project structure
+if [[ ! -d "$PROJECT_ROOT/Sources/DevEcho" ]]; then
+    log_error "Cannot find Swift sources at: $PROJECT_ROOT/Sources/DevEcho"
+    log_error "Make sure the script is in the correct location."
+    exit 1
+fi
+
+if [[ ! -d "$BACKEND_DIR" ]]; then
+    log_error "Cannot find Python backend at: $BACKEND_DIR"
+    exit 1
+fi
+
+# Check Python venv
+if [[ ! -d "$VENV_DIR" ]]; then
+    log_error "Python virtual environment not found at: $VENV_DIR"
+    log_info "Create it with: cd $BACKEND_DIR && python3 -m venv .venv && source .venv/bin/activate && pip install -e ."
+    exit 1
+fi
+
+# ============================================================================
+# Environment Setup
+# ============================================================================
+
+setup_environment() {
+    # Load environment variables from .env.dev if exists
+    if [[ -f "$ENV_FILE" ]]; then
+        log_info "Loading environment from: $ENV_FILE"
+        set -a
+        source "$ENV_FILE"
+        set +a
+    else
+        log_warn "Environment file not found: $ENV_FILE"
+        log_warn "Phase 2 features (AWS/Bedrock) may not be available."
+    fi
+}
+
+# ============================================================================
+# Backend Management
+# ============================================================================
+
+start_backend() {
+    log_info "Starting Python backend..."
+    
+    # Clean up stale socket
+    if [[ -S "$SOCKET_PATH" ]]; then
+        log_warn "Removing stale socket: $SOCKET_PATH"
+        rm -f "$SOCKET_PATH"
+    fi
+    
+    # Activate venv and start backend
+    cd "$BACKEND_DIR"
+    
+    local backend_args=""
+    if [[ "$DEBUG_MODE" == true ]]; then
+        backend_args="--debug"
+    fi
+    
+    # Start backend in background
+    source "$VENV_DIR/bin/activate"
+    
+    if [[ "$DEBUG_MODE" == true ]]; then
+        # Debug mode: show all output
+        python main.py $backend_args &
+    else
+        # Normal mode: suppress MLX-Whisper progress bars (stderr)
+        python main.py $backend_args 2>/dev/null &
+    fi
+    BACKEND_PID=$!
+    
+    # Wait for socket to be created (MLX-Whisper model loading takes time)
+    log_info "Waiting for backend to initialize (loading MLX-Whisper model - max 2 min)..."
+    local max_wait=120  # 2 minutes for model loading
+    local waited=0
+    while [[ ! -S "$SOCKET_PATH" ]] && [[ $waited -lt $max_wait ]]; do
+        sleep 1
+        waited=$((waited + 1))
+        
+        # Show progress every 10 seconds
+        if [[ $((waited % 10)) -eq 0 ]]; then
+            log_info "Still initializing... (${waited}s)"
+        fi
+        
+        # Check if backend is still running
+        if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+            log_error "Backend process died unexpectedly."
+            exit 1
+        fi
+    done
+    
+    if [[ ! -S "$SOCKET_PATH" ]]; then
+        log_error "Backend failed to create socket within ${max_wait}s"
+        exit 1
+    fi
+    
+    log_success "Backend started (PID: $BACKEND_PID)"
+}
+
+# ============================================================================
+# CLI Management
+# ============================================================================
+
+start_cli() {
+    log_info "Starting Swift CLI..."
+    
+    cd "$PROJECT_ROOT"
+    
+    local cli_args=""
+    if [[ "$DEBUG_MODE" == true ]]; then
+        cli_args="--debug"
+    fi
+    
+    # Run CLI in foreground (interactive)
+    swift run dev.echo $cli_args
+    CLI_PID=$!
+}
+
+# ============================================================================
+# Main
+# ============================================================================
+
+main() {
+    log_info "dev.echo launcher"
+    log_info "Project root: $PROJECT_ROOT"
+    
+    setup_environment
+    
+    if [[ "$CLI_ONLY" == true ]]; then
+        # Only start CLI, assume backend is already running
+        if [[ ! -S "$SOCKET_PATH" ]]; then
+            log_error "Backend socket not found. Start backend first or run without --cli-only"
+            exit 1
+        fi
+        start_cli
+    elif [[ "$BACKEND_ONLY" == true ]]; then
+        # Only start backend
+        start_backend
+        log_success "Backend running. Press Ctrl+C to stop."
+        wait "$BACKEND_PID"
+    else
+        # Start both
+        start_backend
+        start_cli
+    fi
+}
+
+main

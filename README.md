@@ -18,17 +18,59 @@ Real-time audio transcription & AI assistant for software developers. Capture sy
 - Ollama (local LLM)
 - AWS account (for cloud features)
 
-## Quick Start
+## Installation
 
 ```bash
-# Build & run CLI
+# 1. Build Swift CLI
 swift build
-swift run dev.echo
 
-# Run backend (separate terminal)
+# 2. Setup Python backend
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+
+# 3. Configure AWS (optional, for cloud features)
+cp .env.dev.example .env.dev
+# Edit .env.dev with your AWS settings
+
+# 4. Install launcher script (optional)
+chmod +x scripts/dev-echo
+sudo ln -s "$(pwd)/scripts/dev-echo" /usr/local/bin/dev-echo
+```
+
+## Quick Start
+
+### Using the Launcher Script (Recommended)
+
+The `dev-echo` script starts both the Python backend and Swift CLI together:
+
+```bash
+dev-echo
+```
+
+Options:
+- `dev-echo` - Start both backend and CLI
+- `dev-echo --debug` - Enable debug logging
+- `dev-echo --backend-only` - Start only the Python backend
+- `dev-echo --cli-only` - Start only the CLI (backend must be running)
+
+The script automatically:
+- Loads environment variables from `backend/.env.dev`
+- Waits for MLX-Whisper model to load
+- Cleans up both processes on Ctrl+C
+
+### Manual Start (Development)
+
+```bash
+# Terminal 1: Run backend
 cd backend
 source .venv/bin/activate
 python main.py
+
+# Terminal 2: Build & run CLI
+swift build
+swift run dev.echo
 ```
 
 ## Commands
