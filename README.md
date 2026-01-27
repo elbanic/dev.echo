@@ -100,3 +100,56 @@ export DEVECHO_KB_ID="your-knowledge-base-id"    # Bedrock Knowledge Base ID
 export DEVECHO_KB_DS_ID="your-data-source-id"    # Bedrock KB Data Source ID (for sync)
 export DEVECHO_BEDROCK_MODEL="us.anthropic.claude-sonnet-4-20250514-v1:0"  # Bedrock model ID
 ```
+
+## Usage Examples
+
+### Basic Workflow
+
+```
+❯ /new                              # Start transcribing mode
+🎙️ Transcribing │ 🔊ON 🎤OFF
+
+🔊 [10:30:15] Let's discuss the API design...
+🔊 [10:30:18] I think we should use REST for this endpoint.
+
+❯ /chat summarize the discussion    # Query Cloud LLM with transcript context
+🤖 The discussion covered API design, with a preference for REST endpoints...
+
+❯ /chat what was decided in the past?    # Query Cloud LLM with KB retrieval
+🤖 According to past_design.md, the team decided to use microservices 
+   architecture with event-driven communication between services...
+
+❯ /save                             # Export transcript to markdown
+💾 Saved to: transcript_2026-01-27_103045.md
+```
+
+### Knowledge Base Management
+
+```
+❯ /managekb                         # Enter KB management mode
+
+❯ /list                             # List documents in KB
+📚 Knowledge Base Documents:
+  1. api-guidelines.md (12.5 KB)
+  2. coding-standards.md (8.2 KB)
+
+❯ /add ~/docs/new-spec.md spec      # Add document with custom name
+✅ Added: spec.md
+
+❯ /sync                             # Trigger Bedrock KB reindexing
+🔄 Sync started...
+```
+
+### Using Microphone
+
+```
+❯ /new
+❯ /mic on                           # Enable microphone capture
+🎤 Microphone enabled
+
+🔊 [10:31:00] What do you think about this approach?
+                   🎤 [10:31:05] I agree, let's go with that design.
+
+❯ /quick what was decided?          # Quick query with local LLM
+🤖 The team agreed on the proposed design approach.
+```
