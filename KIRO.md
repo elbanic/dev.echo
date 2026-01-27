@@ -16,7 +16,7 @@ dev.echo/
 ├── KIRO.md                          # This file - project status
 │
 ├── Sources/DevEcho/
-│   ├── main.swift                   # CLI entry point (ArgumentParser)
+│   ├── main.swift                   # CLI entry point + Application class
 │   │
 │   ├── Command/                     # Command parsing
 │   │   ├── Command.swift            # Command enum (new, chat, quick, etc.)
@@ -31,6 +31,12 @@ dev.echo/
 │   ├── IPC/                         # Inter-process communication
 │   │   ├── IPCClient.swift          # Unix socket client
 │   │   └── IPCProtocol.swift        # Message types, AudioSource
+│   │
+│   ├── Services/                    # Extracted service layer
+│   │   ├── KBService.swift          # KB CRUD operations via IPC
+│   │   ├── LLMService.swift         # Local/Cloud LLM queries via IPC
+│   │   ├── TerminalRenderer.swift   # Display width, wrapping, status line
+│   │   └── InputHandler.swift       # Raw mode terminal input handling
 │   │
 │   └── TUI/                         # Terminal UI (Claude Code style)
 │       ├── TUIEngine.swift          # Main UI engine
@@ -127,7 +133,11 @@ Key implementation details:
 
 | Component | File | Description |
 |-----------|------|-------------|
-| **Entry Point** | `main.swift` | ArgumentParser command, app initialization |
+| **Entry Point** | `main.swift` | ArgumentParser command, Application class |
+| **KBService** | `Services/KBService.swift` | KB CRUD operations via IPC |
+| **LLMService** | `Services/LLMService.swift` | Local/Cloud LLM queries via IPC |
+| **TerminalRenderer** | `Services/TerminalRenderer.swift` | Display width, wrapping, status line |
+| **InputHandler** | `Services/InputHandler.swift` | Raw mode terminal input handling |
 | **Command** | `Command.swift` | All command variants enum |
 | **CommandParser** | `CommandParser.swift` | String → Command parsing with validation |
 | **IPCClient** | `IPCClient.swift` | Unix socket client for Python backend |
