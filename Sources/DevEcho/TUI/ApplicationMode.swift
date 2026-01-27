@@ -86,6 +86,18 @@ enum ApplicationMode: Equatable {
             return "/list  /more  /add {path} {name}  /update  /remove {name}  /sync  /quit"
         }
     }
+    
+    /// Available command strings for tab completion
+    var availableCommands: [String] {
+        switch self {
+        case .command:
+            return ["/new", "/managekb", "/quit"]
+        case .transcribing:
+            return ["/chat ", "/quick ", "/mic", "/stop", "/save", "/quit"]
+        case .knowledgeBaseManagement:
+            return ["/list", "/more", "/add ", "/update ", "/remove ", "/sync", "/quit"]
+        }
+    }
 }
 
 // MARK: - Command Type for Validation

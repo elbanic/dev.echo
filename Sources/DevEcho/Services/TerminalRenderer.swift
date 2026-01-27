@@ -146,7 +146,7 @@ final class TerminalRenderer {
         let modeName = mode.displayName.replacingOccurrences(of: " Mode", with: "")
         
         if mode == .transcribing {
-            let audioStatusText = audioStatus == .active ? "🔊ON" : "🔊--"
+            let audioStatusText = audioStatus == .active ? "🔊ON" : "🔊OFF"
             let micStatusText = micStatus == .active ? "🎤ON" : "🎤OFF"
             return "\(modeIcon) \(modeName) │ \(audioStatusText) \(micStatusText) │ /chat /quick /mic /stop /save /quit"
         } else if mode == .knowledgeBaseManagement {

@@ -98,6 +98,12 @@ final class Application {
             self?.debug.toggle()
         }
         
+        // Set up tab completion callback
+        inputHandler.getAvailableCommands = { [weak self] in
+            guard let self = self else { return [] }
+            return self.currentMode.availableCommands
+        }
+        
         // Initialize audio engine if available
         if #available(macOS 13.0, *) {
             let engine = AudioCaptureEngine(ipcClient: ipcClient, debug: debug)
@@ -283,10 +289,8 @@ final class Application {
         case .quick(let content):
             executeLLMQuery(type: "quick", content: content)
         case .stop:
-            stopAudioCapture()
-            tui.statusBar.setAudioStatus(.inactive)
-            tui.statusBar.setMicStatus(.inactive)
-            print("\n⏹️  Audio capture stopped.\n")
+            skipNextStatusBar = true
+            executeStop()
         case .save:
             print("\n💾 Saving transcript...")
             let result = tui.saveTranscriptToDocuments()
@@ -473,11 +477,33 @@ final class Application {
     private func stopAudioCapture() {
         ipcListeningTask?.cancel()
         ipcListeningTask = nil
-        Task { await ipcClient.disconnect() }
+        // Keep IPC connection alive for /chat and /quick commands
         
         if #available(macOS 13.0, *) {
             guard let engine = audioEngine as? AudioCaptureEngine else { return }
             Task { await engine.stopCapture() }
+        }
+    }
+    
+    private func executeStop() {
+        ipcListeningTask?.cancel()
+        ipcListeningTask = nil
+        
+        if #available(macOS 13.0, *) {
+            guard let engine = audioEngine as? AudioCaptureEngine else {
+                print("\n⚠️  Audio engine not available")
+                printCurrentStatusBar()
+                return
+            }
+            
+            Task {
+                await engine.stopCapture()
+                print("\n⏹️  Audio capture stopped.")
+                self.printCurrentStatusBar()
+            }
+        } else {
+            print("\n⏹️  Audio capture stopped.")
+            printCurrentStatusBar()
         }
     }
     

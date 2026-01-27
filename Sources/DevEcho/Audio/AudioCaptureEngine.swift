@@ -155,8 +155,7 @@ final class AudioCaptureEngine: AudioCaptureDelegate {
         microphoneStatus = .inactive
         onStatusUpdate?(.microphone, .inactive)
         
-        // Disconnect from IPC server
-        await ipcClient.disconnect()
+        // Keep IPC connection alive for /chat and /quick commands
         
         logger.info("Audio capture stopped")
     }
