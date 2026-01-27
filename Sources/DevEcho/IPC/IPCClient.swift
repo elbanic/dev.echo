@@ -234,6 +234,186 @@ actor IPCClient {
         }
     }
     
+    // MARK: - Phase 2: Cloud LLM Methods
+    
+    /// Pending Cloud LLM response continuation
+    private var pendingCloudLLMResponse: CheckedContinuation<CloudLLMResponseMessage, Error>?
+    
+    /// Send Cloud LLM query with RAG support (Phase 2)
+    /// Requirements: 6.1, 6.2
+    func sendCloudLLMQuery(content: String, context: [TranscriptionMessage], forceRag: Bool = false) async throws -> CloudLLMResponseMessage {
+        let queryMessage = CloudLLMQueryMessage(content: content, context: context, forceRag: forceRag)
+        let message = queryMessage.toIPCMessage()
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            self.pendingCloudLLMResponse = continuation
+            
+            Task {
+                do {
+                    try await self.send(message)
+                } catch {
+                    self.pendingCloudLLMResponse = nil
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Phase 2: KB Methods
+    
+    /// Pending KB list response continuation
+    private var pendingKBListResponse: CheckedContinuation<KBListResponseMessage, Error>?
+    
+    /// Pending KB operation response continuation
+    private var pendingKBResponse: CheckedContinuation<KBResponseMessage, Error>?
+    
+    /// Pending KB sync status response continuation
+    private var pendingKBSyncStatusResponse: CheckedContinuation<KBSyncStatusMessage, Error>?
+    
+    /// List KB documents with pagination (Phase 2)
+    /// Requirements: 2.1, 2.4
+    func listKBDocuments(continuationToken: String? = nil, maxItems: Int = 20) async throws -> KBListResponseMessage {
+        let requestMessage = KBListRequestMessage(continuationToken: continuationToken, maxItems: maxItems)
+        let message = requestMessage.toIPCMessage()
+        
+        try await send(message)
+        
+        // Wait for response directly
+        let response = try await receive()
+        
+        if response.type == .kbError {
+            if let errorMsg = KBErrorMessage.fromPayload(response.payload) {
+                throw IPCError.kbError(errorMsg)
+            }
+            throw IPCError.unexpectedResponse
+        }
+        
+        guard response.type == .kbListResponse,
+              let listResponse = KBListResponseMessage.fromPayload(response.payload) else {
+            logger.error("Unexpected response type: \(response.type), payload: \(response.payload)")
+            throw IPCError.unexpectedResponse
+        }
+        
+        return listResponse
+    }
+    
+    /// Add document to KB (Phase 2)
+    /// Requirements: 3.1, 3.2
+    func addKBDocument(sourcePath: String, name: String) async throws -> KBResponseMessage {
+        let addMessage = KBAddMessage(sourcePath: sourcePath, name: name)
+        let message = addMessage.toIPCMessage()
+        
+        try await send(message)
+        
+        let response = try await receive()
+        
+        if response.type == .kbError {
+            if let errorMsg = KBErrorMessage.fromPayload(response.payload) {
+                throw IPCError.kbError(errorMsg)
+            }
+            throw IPCError.unexpectedResponse
+        }
+        
+        guard response.type == .kbResponse,
+              let kbResponse = KBResponseMessage.fromPayload(response.payload) else {
+            throw IPCError.unexpectedResponse
+        }
+        
+        return kbResponse
+    }
+    
+    /// Update document in KB (Phase 2)
+    /// Requirements: 4.1, 4.2
+    func updateKBDocument(sourcePath: String, name: String) async throws -> KBResponseMessage {
+        let updateMessage = KBUpdateMessage(sourcePath: sourcePath, name: name)
+        let message = updateMessage.toIPCMessage()
+        
+        try await send(message)
+        
+        let response = try await receive()
+        
+        if response.type == .kbError {
+            if let errorMsg = KBErrorMessage.fromPayload(response.payload) {
+                throw IPCError.kbError(errorMsg)
+            }
+            throw IPCError.unexpectedResponse
+        }
+        
+        guard response.type == .kbResponse,
+              let kbResponse = KBResponseMessage.fromPayload(response.payload) else {
+            throw IPCError.unexpectedResponse
+        }
+        
+        return kbResponse
+    }
+    
+    /// Remove document from KB (Phase 2)
+    /// Requirements: 5.1
+    func removeKBDocument(name: String) async throws -> KBResponseMessage {
+        let removeMessage = KBRemoveMessage(name: name)
+        let message = removeMessage.toIPCMessage()
+        
+        try await send(message)
+        
+        let response = try await receive()
+        
+        if response.type == .kbError {
+            if let errorMsg = KBErrorMessage.fromPayload(response.payload) {
+                throw IPCError.kbError(errorMsg)
+            }
+            throw IPCError.unexpectedResponse
+        }
+        
+        guard response.type == .kbResponse,
+              let kbResponse = KBResponseMessage.fromPayload(response.payload) else {
+            throw IPCError.unexpectedResponse
+        }
+        
+        return kbResponse
+    }
+    
+    /// Get KB sync status (Phase 2)
+    /// Requirements: 11.3, 11.5
+    func getKBSyncStatus() async throws -> KBSyncStatusMessage {
+        let message = IPCMessage(type: .kbSyncStatus, payload: [:])
+        
+        try await send(message)
+        
+        let response = try await receive()
+        
+        if response.type == .kbError {
+            if let errorMsg = KBErrorMessage.fromPayload(response.payload) {
+                throw IPCError.kbError(errorMsg)
+            }
+            throw IPCError.unexpectedResponse
+        }
+        
+        guard response.type == .kbSyncStatus,
+              let statusResponse = KBSyncStatusMessage.fromPayload(response.payload) else {
+            throw IPCError.unexpectedResponse
+        }
+        
+        return statusResponse
+    }
+    
+    /// Trigger KB sync (Phase 2)
+    /// Requirements: 5.2
+    func triggerKBSync() async throws -> KBSyncTriggerResponseMessage {
+        let triggerMessage = KBSyncTriggerMessage()
+        let message = triggerMessage.toIPCMessage()
+        
+        try await send(message)
+        
+        // Wait for response
+        let response = try await receive()
+        guard response.type == .kbResponse,
+              let triggerResponse = KBSyncTriggerResponseMessage.fromPayload(response.payload) else {
+            throw IPCError.unexpectedResponse
+        }
+        
+        return triggerResponse
+    }
+    
     /// Start listening for incoming messages (transcriptions, etc.)
     func startListening(onTranscription: @escaping @Sendable (TranscriptionMessage) -> Void) async {
         guard isConnected, let input = inputStream else {
@@ -269,7 +449,7 @@ actor IPCClient {
                                     logger.debug("Got transcription: \(transcription.text)")
                                     onTranscription(transcription)
                                 }
-                                // Handle LLM response messages
+                                // Handle LLM response messages (Phase 1 - Local LLM)
                                 else if message.type == .llmResponse {
                                     let response = LLMResponseMessage(
                                         content: message.payload["content"] as? String ?? "",
@@ -281,6 +461,83 @@ actor IPCClient {
                                     if let continuation = pendingLLMResponse {
                                         pendingLLMResponse = nil
                                         continuation.resume(returning: response)
+                                    }
+                                }
+                                // Handle Cloud LLM response messages (Phase 2)
+                                else if message.type == .cloudLLMResponse {
+                                    if let response = CloudLLMResponseMessage.fromPayload(message.payload) {
+                                        logger.debug("Got Cloud LLM response: \(response.content.prefix(50))...")
+                                        
+                                        if let continuation = pendingCloudLLMResponse {
+                                            pendingCloudLLMResponse = nil
+                                            continuation.resume(returning: response)
+                                        }
+                                    }
+                                }
+                                // Handle Cloud LLM error messages (Phase 2)
+                                else if message.type == .cloudLLMError {
+                                    if let errorMsg = CloudLLMErrorMessage.fromPayload(message.payload) {
+                                        logger.error("Cloud LLM error: \(errorMsg.error)")
+                                        
+                                        if let continuation = pendingCloudLLMResponse {
+                                            pendingCloudLLMResponse = nil
+                                            continuation.resume(throwing: IPCError.cloudLLMError(errorMsg))
+                                        }
+                                    }
+                                }
+                                // Handle KB list response messages (Phase 2)
+                                else if message.type == .kbListResponse {
+                                    logger.debug("Parsing KB list response payload: \(message.payload)")
+                                    if let response = KBListResponseMessage.fromPayload(message.payload) {
+                                        logger.debug("Got KB list response: \(response.documents.count) documents")
+                                        
+                                        if let continuation = pendingKBListResponse {
+                                            pendingKBListResponse = nil
+                                            continuation.resume(returning: response)
+                                        }
+                                    } else {
+                                        logger.error("Failed to parse KB list response from payload")
+                                        if let continuation = pendingKBListResponse {
+                                            pendingKBListResponse = nil
+                                            continuation.resume(throwing: IPCError.decodingFailed)
+                                        }
+                                    }
+                                }
+                                // Handle KB operation response messages (Phase 2)
+                                else if message.type == .kbResponse {
+                                    if let response = KBResponseMessage.fromPayload(message.payload) {
+                                        logger.debug("Got KB response: \(response.message)")
+                                        
+                                        if let continuation = pendingKBResponse {
+                                            pendingKBResponse = nil
+                                            continuation.resume(returning: response)
+                                        }
+                                    }
+                                }
+                                // Handle KB error messages (Phase 2)
+                                else if message.type == .kbError {
+                                    if let errorMsg = KBErrorMessage.fromPayload(message.payload) {
+                                        logger.error("KB error: \(errorMsg.error)")
+                                        
+                                        if let continuation = pendingKBResponse {
+                                            pendingKBResponse = nil
+                                            continuation.resume(throwing: IPCError.kbError(errorMsg))
+                                        }
+                                        if let continuation = pendingKBListResponse {
+                                            pendingKBListResponse = nil
+                                            continuation.resume(throwing: IPCError.kbError(errorMsg))
+                                        }
+                                    }
+                                }
+                                // Handle KB sync status messages (Phase 2)
+                                else if message.type == .kbSyncStatus {
+                                    if let status = KBSyncStatusMessage.fromPayload(message.payload) {
+                                        logger.debug("Got KB sync status: \(status.status)")
+                                        
+                                        if let continuation = pendingKBSyncStatusResponse {
+                                            pendingKBSyncStatusResponse = nil
+                                            continuation.resume(returning: status)
+                                        }
                                     }
                                 }
                             }
@@ -317,6 +574,10 @@ enum IPCError: Error, LocalizedError {
     case connectionClosed
     case unexpectedResponse
     
+    // Phase 2 error types
+    case cloudLLMError(CloudLLMErrorMessage)
+    case kbError(KBErrorMessage)
+    
     var errorDescription: String? {
         switch self {
         case .connectionFailed(let reason):
@@ -335,6 +596,20 @@ enum IPCError: Error, LocalizedError {
             return "Connection closed by server"
         case .unexpectedResponse:
             return "Received unexpected response type"
+        case .cloudLLMError(let errorMsg):
+            return "Cloud LLM error: \(errorMsg.error)"
+        case .kbError(let errorMsg):
+            return "KB error: \(errorMsg.error)"
+        }
+    }
+    
+    /// Get suggestion for Cloud LLM errors (Phase 2)
+    var suggestion: String? {
+        switch self {
+        case .cloudLLMError(let errorMsg):
+            return errorMsg.suggestion
+        default:
+            return nil
         }
     }
 }

@@ -303,11 +303,23 @@ final class TUIEngine: TerminalUIManagerProtocol {
             // Microphone on the right side (right-aligned)
             // 🎤 [10:30:18] You:
             // ⎿  I think we should use REST...
-            let header = "\(entry.source.icon) \(timeStamp) \(entry.source.label):"
-            let content = "⎿  \(entry.text)"
-            let rightPadding = max(0, terminalWidth - header.count - 2)
-            let contentPadding = max(0, terminalWidth - content.count - 2)
-            return "\(String(repeating: " ", count: rightPadding))\(header)\n\(String(repeating: " ", count: contentPadding))\(content)"
+            let header = "\(entry.source.icon) \(timeStamp) \(entry.text)"
+            
+            // Calculate max content width (leave 2 chars margin)
+            let maxWidth = terminalWidth - 2
+            
+            // Truncate if too long
+            let displayHeader: String
+            if header.count > maxWidth {
+                let truncateAt = maxWidth - 3  // Leave room for "..."
+                let index = header.index(header.startIndex, offsetBy: truncateAt)
+                displayHeader = String(header[..<index]) + "..."
+            } else {
+                displayHeader = header
+            }
+            
+            let rightPadding = max(0, terminalWidth - displayHeader.count - 2)
+            return "\(String(repeating: " ", count: rightPadding))\(displayHeader)"
         }
     }
     

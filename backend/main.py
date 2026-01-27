@@ -2,6 +2,7 @@
 dev.echo Backend Main Entry Point
 
 Starts the IPC server with transcription service and LLM integration.
+Supports both Phase 1 (local) and Phase 2 (cloud) services.
 """
 
 import argparse
@@ -10,7 +11,7 @@ import logging
 import signal
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from ipc.server import IPCServer
 from ipc.protocol import (
@@ -23,6 +24,15 @@ from ipc.protocol import (
     KBRemoveMessage,
     KBListResponseMessage,
     KBResponseMessage,
+    KBErrorMessage,
+    # Phase 2 messages
+    CloudLLMQueryMessage,
+    CloudLLMResponseMessage,
+    CloudLLMErrorMessage,
+    KBListRequestMessage,
+    KBListResponseWithPaginationMessage,
+    KBSyncStatusMessage,
+    KBSyncTriggerResponseMessage,
 )
 from transcription import TranscriptionService, TranscriptionResult
 from llm import LLMService, OllamaUnavailableError, LLMError
@@ -34,6 +44,13 @@ from kb import (
     KBError,
 )
 
+# Phase 2 imports
+from aws.config import AWSConfig
+from aws.s3_manager import S3DocumentManager
+from aws.kb_service import KnowledgeBaseService
+from aws.agents import CloudLLMService
+from aws.handlers import CloudLLMHandler, S3KBHandler, KBSyncHandler
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +59,7 @@ class DevEchoBackend:
     Main backend application.
     
     Integrates IPC server with transcription service and LLM.
+    Supports both Phase 1 (local) and Phase 2 (cloud) services.
     """
     
     def __init__(self, socket_path: Optional[str] = None):
@@ -50,10 +68,95 @@ class DevEchoBackend:
         self.llm_service = LLMService()
         self.kb_manager = KnowledgeBaseManager()
         self._running = False
+        
+        # Phase 2 services (initialized if configured)
+        self._aws_config: Optional[AWSConfig] = None
+        self._s3_manager: Optional[S3DocumentManager] = None
+        self._kb_service: Optional[KnowledgeBaseService] = None
+        self._cloud_llm_service: Optional[CloudLLMService] = None
+        
+        # Phase 2 handlers
+        self._cloud_llm_handler: Optional[CloudLLMHandler] = None
+        self._s3_kb_handler: Optional[S3KBHandler] = None
+        self._kb_sync_handler: Optional[KBSyncHandler] = None
+        
+        # Phase 2 enabled flag
+        self._phase2_enabled = False
+    
+    def _init_phase2_services(self) -> bool:
+        """
+        Initialize Phase 2 AWS services if configured.
+        
+        Requirements: 9.3, 9.4, 10.5 - Handle AWS credential errors gracefully
+        
+        Returns:
+            True if Phase 2 services are initialized successfully
+        """
+        try:
+            # Load AWS configuration
+            self._aws_config = AWSConfig.from_env()
+            
+            # Check if AWS is configured
+            is_valid, missing = self._aws_config.validate()
+            if not is_valid:
+                logger.info(
+                    f"Phase 2 services not configured. Missing: {', '.join(missing)}. "
+                    "Using Phase 1 (local) services only."
+                )
+                return False
+            
+            logger.info("Initializing Phase 2 AWS services...")
+            
+            # Initialize S3 Document Manager
+            self._s3_manager = S3DocumentManager(
+                bucket_name=self._aws_config.s3_bucket,
+                prefix=self._aws_config.s3_prefix,
+                region=self._aws_config.aws_region,
+            )
+            
+            # Initialize Knowledge Base Service
+            # Note: data_source_id is required for sync operations
+            import os
+            data_source_id = os.getenv("DEVECHO_KB_DS_ID")
+            self._kb_service = KnowledgeBaseService(
+                knowledge_base_id=self._aws_config.knowledge_base_id,
+                data_source_id=data_source_id,
+                region=self._aws_config.aws_region,
+            )
+            
+            # Initialize Cloud LLM Service
+            self._cloud_llm_service = CloudLLMService(
+                knowledge_base_id=self._aws_config.knowledge_base_id,
+                model_id=self._aws_config.bedrock_model_id,
+                region=self._aws_config.aws_region,
+            )
+            
+            # Initialize handlers
+            self._cloud_llm_handler = CloudLLMHandler(self._cloud_llm_service)
+            self._s3_kb_handler = S3KBHandler(self._s3_manager, self._kb_service)
+            self._kb_sync_handler = KBSyncHandler(self._kb_service)
+            
+            logger.info(
+                f"Phase 2 services initialized: "
+                f"bucket={self._aws_config.s3_bucket}, "
+                f"kb_id={self._aws_config.knowledge_base_id}, "
+                f"model={self._aws_config.bedrock_model_id}"
+            )
+            return True
+            
+        except Exception as e:
+            logger.warning(
+                f"Failed to initialize Phase 2 services: {e}. "
+                "Using Phase 1 (local) services only."
+            )
+            return False
     
     async def start(self) -> None:
         """Start the backend services."""
         logger.info("Starting dev.echo backend...")
+        
+        # Initialize Phase 2 services if configured
+        self._phase2_enabled = self._init_phase2_services()
         
         # Set up transcription callback
         self.transcription_service.set_transcription_callback(
@@ -63,14 +166,18 @@ class DevEchoBackend:
         # Set up audio handler
         self.ipc_server.on_audio_data(self._on_audio_data)
         
-        # Set up LLM query handler
+        # Set up LLM query handler (Phase 1 - local)
         self.ipc_server.on_llm_query(self._on_llm_query)
         
-        # Set up KB handlers
+        # Set up KB handlers (Phase 1 - local)
         self.ipc_server.on_kb_list(self._on_kb_list)
         self.ipc_server.on_kb_add(self._on_kb_add)
         self.ipc_server.on_kb_update(self._on_kb_update)
         self.ipc_server.on_kb_remove(self._on_kb_remove)
+        
+        # Set up Phase 2 handlers if enabled
+        if self._phase2_enabled:
+            self._register_phase2_handlers()
         
         # Start services
         await self.transcription_service.start()
@@ -78,7 +185,44 @@ class DevEchoBackend:
         await self.ipc_server.start()
         
         self._running = True
-        logger.info("dev.echo backend started")
+        
+        if self._phase2_enabled:
+            logger.info("dev.echo backend started (Phase 1 + Phase 2)")
+        else:
+            logger.info("dev.echo backend started (Phase 1 only)")
+    
+    def _register_phase2_handlers(self) -> None:
+        """Register Phase 2 handlers with IPC server."""
+        logger.info("Registering Phase 2 handlers...")
+        
+        # Cloud LLM handler
+        self.ipc_server.on_cloud_llm_query(
+            self._cloud_llm_handler.handle_cloud_llm_query
+        )
+        
+        # S3-based KB handlers (override Phase 1 handlers)
+        self.ipc_server.on_kb_list_paginated(
+            self._s3_kb_handler.handle_kb_list
+        )
+        self.ipc_server.on_s3_kb_add(
+            self._s3_kb_handler.handle_kb_add
+        )
+        self.ipc_server.on_s3_kb_update(
+            self._s3_kb_handler.handle_kb_update
+        )
+        self.ipc_server.on_s3_kb_remove(
+            self._s3_kb_handler.handle_kb_remove
+        )
+        
+        # KB sync handlers
+        self.ipc_server.on_kb_sync_status(
+            self._kb_sync_handler.handle_sync_status
+        )
+        self.ipc_server.on_kb_sync_trigger(
+            self._kb_sync_handler.handle_sync_trigger
+        )
+        
+        logger.info("Phase 2 handlers registered")
     
     async def stop(self) -> None:
         """Stop the backend services."""
@@ -88,6 +232,10 @@ class DevEchoBackend:
         await self.ipc_server.stop()
         await self.transcription_service.stop()
         await self.llm_service.stop()
+        
+        # Shutdown Phase 2 services if enabled
+        if self._phase2_enabled and self._cloud_llm_service:
+            await self._cloud_llm_service.shutdown()
         
         logger.info("dev.echo backend stopped")
     

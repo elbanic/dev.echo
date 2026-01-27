@@ -69,5 +69,6 @@ htmlcov/
 # === Environment & Secrets ===
 .env
 .env.local
+.env.dev
 *.pem
 *.key

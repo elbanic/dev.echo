@@ -46,10 +46,17 @@ dev.echo/
 │   ├── pyproject.toml               # Python dependencies
 │   ├── README.md                    # Backend documentation
 │   ├── __init__.py
-│   ├── main.py                      # Backend entry point
+│   ├── main.py                      # Backend entry point (Phase 1 + Phase 2)
+│   ├── aws/                         # Phase 2: AWS integrations
+│   │   ├── __init__.py
+│   │   ├── config.py                # AWS configuration (env vars)
+│   │   ├── s3_manager.py            # S3 document CRUD operations
+│   │   ├── kb_service.py            # Bedrock Knowledge Base service
+│   │   ├── agents.py                # Cloud LLM agents (Strands + Bedrock)
+│   │   └── handlers.py              # Phase 2 IPC handlers
 │   ├── ipc/
 │   │   ├── __init__.py
-│   │   ├── server.py                # Unix socket server (asyncio)
+│   │   ├── server.py                # Unix socket server (Phase 1 + Phase 2)
 │   │   └── protocol.py              # Message protocol definitions
 │   ├── kb/
 │   │   ├── __init__.py
@@ -64,6 +71,15 @@ dev.echo/
 │       ├── __init__.py
 │       ├── engine.py                # MLX-Whisper transcription engine
 │       └── service.py               # Transcription service with buffering
+│   └── tests/                       # Python tests
+│       ├── test_agents.py           # Cloud LLM agents tests
+│       ├── test_handlers.py         # Phase 2 IPC handlers tests
+│       ├── test_kb.py               # Knowledge base manager tests
+│       ├── test_kb_service.py       # KB service tests
+│       ├── test_llm.py              # Local LLM tests
+│       ├── test_protocol.py         # IPC protocol tests
+│       ├── test_s3_manager.py       # S3 document manager tests
+│       └── test_transcription.py    # Transcription engine tests
 │
 └── .kiro/
     ├── specs/dev-echo-phase1/       # Spec documents
@@ -124,7 +140,7 @@ Key implementation details:
 | **TranscriptEntry** | `TranscriptEntry.swift` | Transcript and LLM response models |
 | **ApplicationMode** | `ApplicationMode.swift` | command, transcribing, knowledgeBaseManagement |
 | **SystemAudioCapture** | `Audio/SystemAudioCapture.swift` | ScreenCaptureKit system audio (macOS 13+) |
-| **MicrophoneCapture** | `Audio/MicrophoneCapture.swift` | AVAudioEngine microphone input |
+| **MicrophoneCapture** | `Audio/MicrophoneCapture.swift` | AVAudioEngine microphone input with VAD |
 | **SampleRateConverter** | `Audio/SampleRateConverter.swift` | 48kHz → 16kHz conversion (vDSP) |
 | **AudioCaptureEngine** | `Audio/AudioCaptureEngine.swift` | Unified capture + IPC streaming |
 
@@ -132,14 +148,26 @@ Key implementation details:
 
 | Component | File | Description |
 |-----------|------|-------------|
-| **IPC Server** | `ipc/server.py` | Asyncio Unix socket server |
-| **Protocol** | `ipc/protocol.py` | Message protocol definitions |
+| **IPC Server** | `ipc/server.py` | Asyncio Unix socket server (Phase 1 + Phase 2) |
+| **Protocol** | `ipc/protocol.py` | Message protocol definitions (Phase 1 + Phase 2) |
 | **TranscriptionEngine** | `transcription/engine.py` | MLX-Whisper transcription |
 | **TranscriptionService** | `transcription/service.py` | Audio buffering + transcription + aggregation |
 | **LocalLLMAgent** | `llm/agent.py` | Strands Agent with Ollama/Llama |
 | **LLMService** | `llm/service.py` | LLM service layer for IPC |
 | **KnowledgeBaseManager** | `kb/manager.py` | KB document operations (list, add, update, remove) |
-| **Backend Main** | `main.py` | Backend entry point |
+| **AWSConfig** | `aws/config.py` | AWS configuration from environment variables |
+| **S3DocumentManager** | `aws/s3_manager.py` | S3 document CRUD with pagination |
+| **KnowledgeBaseService** | `aws/kb_service.py` | Bedrock KB connectivity, sync status, sync trigger |
+| **SimpleCloudAgent** | `aws/agents.py` | Strands Agent with Bedrock Claude (transcript-only) |
+| **RAGCloudAgent** | `aws/agents.py` | Strands Agent with Bedrock KB retrieval (RAG) |
+| **IntentClassifier** | `aws/agents.py` | Keyword-based query intent classification |
+| **CloudLLMService** | `aws/agents.py` | Service layer routing queries to appropriate agent |
+| **ConversationContext** | `aws/agents.py` | Context dataclass with transcript and user query |
+| **CloudLLMResponse** | `aws/agents.py` | Response dataclass with content, sources, tokens |
+| **CloudLLMHandler** | `aws/handlers.py` | IPC handler for Cloud LLM queries |
+| **S3KBHandler** | `aws/handlers.py` | IPC handler for S3-based KB operations |
+| **KBSyncHandler** | `aws/handlers.py` | IPC handler for KB sync status and triggers |
+| **Backend Main** | `main.py` | Backend entry point (Phase 1 + Phase 2 auto-detection) |
 
 ## Type Definitions
 
@@ -224,3 +252,39 @@ cd backend && source .venv/bin/activate && pytest
 - Socket path: `/tmp/devecho.sock`
 - Protocol: JSON over Unix Domain Socket
 - Message types: audio_data, transcription, llm_query, llm_response, ping/pong, shutdown
+
+## Phase 2 IPC Integration
+
+Phase 2 services are automatically enabled when AWS environment variables are configured:
+- `DEVECHO_S3_BUCKET`: S3 bucket for KB documents
+- `DEVECHO_KB_ID`: Bedrock Knowledge Base ID
+- `AWS_REGION`: AWS region (default: us-west-2)
+- `DEVECHO_BEDROCK_MODEL`: Bedrock model ID (default: Claude Sonnet)
+
+### Phase 2 Message Types
+| Message Type | Direction | Description |
+|--------------|-----------|-------------|
+| `cloud_llm_query` | CLI → Backend | Cloud LLM query with RAG support |
+| `cloud_llm_response` | Backend → CLI | Response with content and sources |
+| `cloud_llm_error` | Backend → CLI | Error with type and suggestion |
+| `kb_list` (paginated) | CLI → Backend | List S3 documents with pagination |
+| `kb_list_response` | Backend → CLI | Documents with has_more flag |
+| `kb_sync_status` | CLI → Backend | Request KB sync status |
+| `kb_sync_trigger` | CLI → Backend | Trigger KB reindexing |
+
+### Phase 2 Handler Architecture
+```
+IPC Server
+├── Phase 1 Handlers (local)
+│   ├── audio_data → TranscriptionService
+│   ├── llm_query → LLMService (Ollama)
+│   └── kb_* → KnowledgeBaseManager (local files)
+│
+└── Phase 2 Handlers (cloud, auto-enabled if configured)
+    ├── cloud_llm_query → CloudLLMHandler → CloudLLMService
+    ├── kb_list → S3KBHandler → S3DocumentManager
+    ├── kb_add/update/remove → S3KBHandler → S3DocumentManager
+    └── kb_sync_* → KBSyncHandler → KnowledgeBaseService
+```
+
+Phase 2 handlers override Phase 1 KB handlers when AWS is configured, providing S3-based storage with Bedrock KB integration.

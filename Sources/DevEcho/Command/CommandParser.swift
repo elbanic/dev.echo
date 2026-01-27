@@ -60,11 +60,24 @@ struct CommandParser: CommandParserProtocol {
             return .save
             
         case "/mic":
-            return .mic
+            // Parse optional on/off argument
+            if let arg = arguments?.lowercased() {
+                if arg == "on" {
+                    return .mic(enable: true)
+                } else if arg == "off" {
+                    return .mic(enable: false)
+                }
+            }
+            return .mic(enable: nil)  // Toggle mode
             
         // KB Management Mode commands
         case "/list":
             return .list
+            
+        case "/more":
+            // /more uses continuation token from previous list
+            // Token is managed by the application, not passed as argument
+            return .listMore(token: "")  // Empty token signals "use stored token"
             
         case "/remove":
             guard let name = arguments, !name.isEmpty else {
@@ -91,6 +104,9 @@ struct CommandParser: CommandParserProtocol {
                 return .unknown(input: input)
             }
             return .add(fromPath: fromPath, name: name)
+            
+        case "/sync":
+            return .sync
             
         default:
             return .unknown(input: input)

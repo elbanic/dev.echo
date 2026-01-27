@@ -36,7 +36,7 @@ enum ApplicationMode: Equatable {
         case .transcribing:
             return [.chat, .quick, .stop, .save, .mic, .quit]
         case .knowledgeBaseManagement:
-            return [.list, .add, .update, .remove, .quit]
+            return [.list, .listMore, .add, .update, .remove, .sync, .quit]
         }
     }
     
@@ -65,9 +65,11 @@ enum ApplicationMode: Equatable {
         case .knowledgeBaseManagement:
             return """
             /list                    - List all documents
+            /more                    - Show more documents (pagination)
             /add {path} {name}       - Add document from path
             /update {path} {name}    - Update existing document
             /remove {name}           - Remove document
+            /sync                    - Trigger KB indexing
             /quit                    - Return to command mode
             """
         }
@@ -81,7 +83,7 @@ enum ApplicationMode: Equatable {
         case .transcribing:
             return "/chat {msg}  /quick {msg}  /stop  /save  /quit"
         case .knowledgeBaseManagement:
-            return "/list  /add {path} {name}  /update {path} {name}  /remove {name}  /quit"
+            return "/list  /more  /add {path} {name}  /update  /remove {name}  /sync  /quit"
         }
     }
 }
@@ -92,7 +94,7 @@ enum ApplicationMode: Equatable {
 enum CommandType: Hashable {
     case new, managekb, quit
     case chat, quick, stop, save, mic
-    case list, add, update, remove
+    case list, listMore, add, update, remove, sync
     case unknown
 }
 
@@ -109,9 +111,11 @@ extension Command {
         case .save: return .save
         case .mic: return .mic
         case .list: return .list
+        case .listMore: return .listMore
         case .add: return .add
         case .update: return .update
         case .remove: return .remove
+        case .sync: return .sync
         case .unknown: return .unknown
         }
     }

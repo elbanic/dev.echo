@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Callable, Optional, Awaitable
+from typing import Callable, Optional, Awaitable, Union
 
 from .protocol import (
     MessageType,
@@ -25,6 +25,15 @@ from .protocol import (
     KBRemoveMessage,
     KBResponseMessage,
     KBErrorMessage,
+    # Phase 2 messages
+    CloudLLMQueryMessage,
+    CloudLLMResponseMessage,
+    CloudLLMErrorMessage,
+    KBListRequestMessage,
+    KBListResponseWithPaginationMessage,
+    KBSyncStatusMessage,
+    KBSyncTriggerMessage,
+    KBSyncTriggerResponseMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,13 +50,38 @@ class IPCServer:
         self.clients: list[asyncio.StreamWriter] = []
         self._running = False
         
-        # Message handlers
+        # Phase 1 message handlers
         self._audio_handler: Optional[Callable[[AudioDataMessage], Awaitable[None]]] = None
         self._llm_query_handler: Optional[Callable[[LLMQueryMessage], Awaitable[LLMResponseMessage]]] = None
         self._kb_list_handler: Optional[Callable[[], Awaitable[KBListResponseMessage]]] = None
         self._kb_add_handler: Optional[Callable[[KBAddMessage], Awaitable[KBResponseMessage]]] = None
         self._kb_update_handler: Optional[Callable[[KBUpdateMessage], Awaitable[KBResponseMessage]]] = None
         self._kb_remove_handler: Optional[Callable[[KBRemoveMessage], Awaitable[KBResponseMessage]]] = None
+        
+        # Phase 2 message handlers
+        self._cloud_llm_query_handler: Optional[
+            Callable[[CloudLLMQueryMessage], Awaitable[Union[CloudLLMResponseMessage, CloudLLMErrorMessage]]]
+        ] = None
+        self._kb_list_paginated_handler: Optional[
+            Callable[[KBListRequestMessage], Awaitable[Union[KBListResponseWithPaginationMessage, KBErrorMessage]]]
+        ] = None
+        self._kb_sync_status_handler: Optional[
+            Callable[[], Awaitable[Union[KBSyncStatusMessage, KBErrorMessage]]]
+        ] = None
+        self._kb_sync_trigger_handler: Optional[
+            Callable[[], Awaitable[Union[KBSyncTriggerResponseMessage, KBErrorMessage]]]
+        ] = None
+        
+        # Phase 2 S3-based KB handlers (override Phase 1 handlers)
+        self._s3_kb_add_handler: Optional[
+            Callable[[KBAddMessage], Awaitable[Union[KBResponseMessage, KBErrorMessage]]]
+        ] = None
+        self._s3_kb_update_handler: Optional[
+            Callable[[KBUpdateMessage], Awaitable[Union[KBResponseMessage, KBErrorMessage]]]
+        ] = None
+        self._s3_kb_remove_handler: Optional[
+            Callable[[KBRemoveMessage], Awaitable[Union[KBResponseMessage, KBErrorMessage]]]
+        ] = None
     
     def on_audio_data(self, handler: Callable[[AudioDataMessage], Awaitable[None]]):
         """Register handler for audio data messages."""
@@ -72,6 +106,57 @@ class IPCServer:
     def on_kb_remove(self, handler: Callable[[KBRemoveMessage], Awaitable[KBResponseMessage]]):
         """Register handler for KB remove messages."""
         self._kb_remove_handler = handler
+    
+    # Phase 2 handler registration methods
+    
+    def on_cloud_llm_query(
+        self,
+        handler: Callable[[CloudLLMQueryMessage], Awaitable[Union[CloudLLMResponseMessage, CloudLLMErrorMessage]]]
+    ):
+        """Register handler for Cloud LLM query messages (Phase 2)."""
+        self._cloud_llm_query_handler = handler
+    
+    def on_kb_list_paginated(
+        self,
+        handler: Callable[[KBListRequestMessage], Awaitable[Union[KBListResponseWithPaginationMessage, KBErrorMessage]]]
+    ):
+        """Register handler for paginated KB list messages (Phase 2)."""
+        self._kb_list_paginated_handler = handler
+    
+    def on_kb_sync_status(
+        self,
+        handler: Callable[[], Awaitable[Union[KBSyncStatusMessage, KBErrorMessage]]]
+    ):
+        """Register handler for KB sync status messages (Phase 2)."""
+        self._kb_sync_status_handler = handler
+    
+    def on_kb_sync_trigger(
+        self,
+        handler: Callable[[], Awaitable[Union[KBSyncTriggerResponseMessage, KBErrorMessage]]]
+    ):
+        """Register handler for KB sync trigger messages (Phase 2)."""
+        self._kb_sync_trigger_handler = handler
+    
+    def on_s3_kb_add(
+        self,
+        handler: Callable[[KBAddMessage], Awaitable[Union[KBResponseMessage, KBErrorMessage]]]
+    ):
+        """Register S3-based handler for KB add messages (Phase 2)."""
+        self._s3_kb_add_handler = handler
+    
+    def on_s3_kb_update(
+        self,
+        handler: Callable[[KBUpdateMessage], Awaitable[Union[KBResponseMessage, KBErrorMessage]]]
+    ):
+        """Register S3-based handler for KB update messages (Phase 2)."""
+        self._s3_kb_update_handler = handler
+    
+    def on_s3_kb_remove(
+        self,
+        handler: Callable[[KBRemoveMessage], Awaitable[Union[KBResponseMessage, KBErrorMessage]]]
+    ):
+        """Register S3-based handler for KB remove messages (Phase 2)."""
+        self._s3_kb_remove_handler = handler
     
     async def send_transcription(self, transcription: TranscriptionMessage):
         """Send transcription result to all connected clients."""
@@ -196,30 +281,83 @@ class IPCServer:
                 writer.write(response.to_ipc_message().to_json().encode() + b"\n")
                 await writer.drain()
         
+        elif message.type == MessageType.CLOUD_LLM_QUERY:
+            # Phase 2: Cloud LLM query
+            if self._cloud_llm_query_handler:
+                query_msg = CloudLLMQueryMessage.from_payload(message.payload)
+                response = await self._cloud_llm_query_handler(query_msg)
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+        
         elif message.type == MessageType.KB_LIST:
-            if self._kb_list_handler:
+            # Check for Phase 2 paginated handler first
+            logger.info(f"KB_LIST received, paginated_handler={self._kb_list_paginated_handler is not None}")
+            if self._kb_list_paginated_handler:
+                request_msg = KBListRequestMessage.from_payload(message.payload)
+                logger.info(f"Calling paginated handler with request: {request_msg}")
+                response = await self._kb_list_paginated_handler(request_msg)
+                logger.info(f"Paginated handler response: {response}")
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+            elif self._kb_list_handler:
+                # Fallback to Phase 1 handler
                 response = await self._kb_list_handler()
                 writer.write(response.to_ipc_message().to_json().encode() + b"\n")
                 await writer.drain()
         
         elif message.type == MessageType.KB_ADD:
-            if self._kb_add_handler:
+            # Check for Phase 2 S3 handler first
+            if self._s3_kb_add_handler:
+                add_msg = KBAddMessage.from_payload(message.payload)
+                response = await self._s3_kb_add_handler(add_msg)
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+            elif self._kb_add_handler:
+                # Fallback to Phase 1 handler
                 add_msg = KBAddMessage.from_payload(message.payload)
                 response = await self._kb_add_handler(add_msg)
                 writer.write(response.to_ipc_message().to_json().encode() + b"\n")
                 await writer.drain()
         
         elif message.type == MessageType.KB_UPDATE:
-            if self._kb_update_handler:
+            # Check for Phase 2 S3 handler first
+            if self._s3_kb_update_handler:
+                update_msg = KBUpdateMessage.from_payload(message.payload)
+                response = await self._s3_kb_update_handler(update_msg)
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+            elif self._kb_update_handler:
+                # Fallback to Phase 1 handler
                 update_msg = KBUpdateMessage.from_payload(message.payload)
                 response = await self._kb_update_handler(update_msg)
                 writer.write(response.to_ipc_message().to_json().encode() + b"\n")
                 await writer.drain()
         
         elif message.type == MessageType.KB_REMOVE:
-            if self._kb_remove_handler:
+            # Check for Phase 2 S3 handler first
+            if self._s3_kb_remove_handler:
+                remove_msg = KBRemoveMessage.from_payload(message.payload)
+                response = await self._s3_kb_remove_handler(remove_msg)
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+            elif self._kb_remove_handler:
+                # Fallback to Phase 1 handler
                 remove_msg = KBRemoveMessage.from_payload(message.payload)
                 response = await self._kb_remove_handler(remove_msg)
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+        
+        elif message.type == MessageType.KB_SYNC_STATUS:
+            # Phase 2: KB sync status
+            if self._kb_sync_status_handler:
+                response = await self._kb_sync_status_handler()
+                writer.write(response.to_ipc_message().to_json().encode() + b"\n")
+                await writer.drain()
+        
+        elif message.type == MessageType.KB_SYNC_TRIGGER:
+            # Phase 2: KB sync trigger
+            if self._kb_sync_trigger_handler:
+                response = await self._kb_sync_trigger_handler()
                 writer.write(response.to_ipc_message().to_json().encode() + b"\n")
                 await writer.drain()
         

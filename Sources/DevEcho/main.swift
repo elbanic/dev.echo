@@ -84,6 +84,9 @@ final class Application {
     private var lastHeaderTime: Date = Date.distantPast  // Track when we last showed icon+timestamp
     private let headerInterval: TimeInterval = 7.0  // Show icon+timestamp every 7 seconds
     
+    // Phase 2: KB pagination state
+    private var lastKBContinuationToken: String?
+    
     /// Current application mode (delegated to state machine)
     var currentMode: ApplicationMode {
         stateMachine.currentMode
@@ -293,6 +296,105 @@ final class Application {
     
     // MARK: - Status Line Builder
     
+    /// Calculate display width accounting for emoji (2 columns each)
+    private func displayWidth(_ str: String) -> Int {
+        var width = 0
+        for scalar in str.unicodeScalars {
+            // Emoji and wide characters take 2 columns
+            if scalar.value > 0x1F00 || (scalar.value >= 0x2600 && scalar.value <= 0x27BF) ||
+               (scalar.value >= 0x1F300 && scalar.value <= 0x1F9FF) {
+                width += 2
+            } else {
+                width += 1
+            }
+        }
+        return width
+    }
+    
+    /// Truncate string to fit display width
+    private func truncateToWidth(_ str: String, maxWidth: Int) -> String {
+        var width = 0
+        var result = ""
+        for char in str {
+            var charWidth = 0
+            for scalar in char.unicodeScalars {
+                if scalar.value > 0x1F00 || (scalar.value >= 0x2600 && scalar.value <= 0x27BF) ||
+                   (scalar.value >= 0x1F300 && scalar.value <= 0x1F9FF) {
+                    charWidth = 2
+                } else {
+                    charWidth = max(charWidth, 1)
+                }
+            }
+            if width + charWidth + 3 > maxWidth {  // Leave room for "..."
+                return result + "..."
+            }
+            width += charWidth
+            result.append(char)
+        }
+        return result
+    }
+    
+    /// Wrap string into multiple lines to fit display width (right-aligned for microphone)
+    private func wrapToWidth(_ str: String, maxWidth: Int, rightAlign: Bool) -> [String] {
+        var lines: [String] = []
+        var currentLine = ""
+        var currentWidth = 0
+        
+        for char in str {
+            var charWidth = 0
+            for scalar in char.unicodeScalars {
+                if scalar.value > 0x1F00 || (scalar.value >= 0x2600 && scalar.value <= 0x27BF) ||
+                   (scalar.value >= 0x1F300 && scalar.value <= 0x1F9FF) {
+                    charWidth = 2
+                } else {
+                    charWidth = max(charWidth, 1)
+                }
+            }
+            
+            if currentWidth + charWidth > maxWidth {
+                lines.append(currentLine)
+                currentLine = String(char)
+                currentWidth = charWidth
+            } else {
+                currentLine.append(char)
+                currentWidth += charWidth
+            }
+        }
+        
+        if !currentLine.isEmpty {
+            lines.append(currentLine)
+        }
+        
+        return lines
+    }
+    
+    /// Print content with optional right alignment, wrapping if needed
+    private func printWrapped(_ content: String, maxWidth: Int, rightAlign: Bool) {
+        let contentWidth = displayWidth(content)
+        
+        if contentWidth <= maxWidth {
+            // Fits on one line
+            if rightAlign {
+                let padding = max(0, terminalWidth - contentWidth)
+                print(String(repeating: " ", count: padding) + content)
+            } else {
+                print(content)
+            }
+        } else {
+            // Need to wrap
+            let lines = wrapToWidth(content, maxWidth: maxWidth, rightAlign: rightAlign)
+            for line in lines {
+                if rightAlign {
+                    let lineWidth = displayWidth(line)
+                    let padding = max(0, terminalWidth - lineWidth)
+                    print(String(repeating: " ", count: padding) + line)
+                } else {
+                    print(line)
+                }
+            }
+        }
+    }
+    
     /// Build the status line with mode, audio status, and available commands
     private func buildStatusLine() -> String {
         let modeIcon = currentMode == .transcribing ? "🎙️" : (currentMode == .knowledgeBaseManagement ? "📚" : "🤖")
@@ -303,7 +405,7 @@ final class Application {
             let micStatus = tui.statusBar.micStatus == .active ? "🎤ON" : "🎤OFF"
             return "\(modeIcon) \(modeName) │ \(audioStatus) \(micStatus) │ /chat /quick /mic /stop /save /quit"
         } else if currentMode == .knowledgeBaseManagement {
-            return "\(modeIcon) \(modeName) │ /list /add /update /remove /quit"
+            return "\(modeIcon) \(modeName) │ /list /add /update /remove /sync /quit"
         } else {
             return "\(modeIcon) \(modeName) │ /new /managekb /quit"
         }
@@ -409,6 +511,11 @@ final class Application {
                         
                         // Start listening for transcriptions
                         startIPCListening()
+                        
+                        // Phase 2: Check KB connectivity on startup
+                        // Requirements: 11.3, 11.5
+                        await checkKBConnectivity()
+                        
                     } catch {
                         print("\r\u{001B}[K   ⚠️  Python backend not running: \(error.localizedDescription)")
                         print("   💡 Start backend with: cd backend && source .venv/bin/activate && python main.py")
@@ -445,6 +552,35 @@ final class Application {
             // Still set status to show UI is in transcribing mode
             tui.statusBar.setAudioStatus(.inactive)
             tui.statusBar.setMicStatus(.inactive)
+        }
+    }
+    
+    /// Check KB connectivity on startup (Phase 2)
+    /// Requirements: 11.3, 11.5
+    private func checkKBConnectivity() async {
+        do {
+            let syncStatus = try await ipcClient.getKBSyncStatus()
+            
+            // Update status bar with KB status
+            tui.statusBar.setKBStatus(from: syncStatus)
+            
+            // Display KB status
+            print("\r\u{001B}[K   \(syncStatus.statusIcon) KB: \(syncStatus.status) (\(syncStatus.documentCount) documents)")
+            
+            if let errorMessage = syncStatus.errorMessage {
+                print("\r\u{001B}[K   ⚠️  KB Warning: \(errorMessage)")
+            }
+            
+            print("❯ \(self.currentInput)", terminator: "")
+            fflush(stdout)
+            
+        } catch {
+            // Handle connectivity errors gracefully
+            tui.statusBar.setKBStatus(isConnected: false, status: "UNKNOWN", documentCount: 0)
+            
+            // Don't show error for KB - it's optional
+            // Just log it for debugging
+            logger.debug("KB connectivity check failed: \(error.localizedDescription)")
         }
     }
     
@@ -487,8 +623,7 @@ final class Application {
                     let content = "\(icon) [\(timestamp)] \(transcription.text)"
                     
                     if source == .microphone {
-                        let padding = max(0, self.terminalWidth - content.count)
-                        print(String(repeating: " ", count: padding) + content)
+                        self.printWrapped(content, maxWidth: maxLineWidth, rightAlign: true)
                     } else {
                         print(content)
                     }
@@ -507,8 +642,7 @@ final class Application {
                         print("\u{001B}[A\u{001B}[K", terminator: "")
                         
                         if source == .microphone {
-                            let padding = max(0, self.terminalWidth - content.count)
-                            print(String(repeating: " ", count: padding) + content)
+                            self.printWrapped(content, maxWidth: maxLineWidth, rightAlign: true)
                         } else {
                             print(content)
                         }
@@ -521,8 +655,7 @@ final class Application {
                         
                         if source == .microphone {
                             let content = indent + transcription.text
-                            let padding = max(0, self.terminalWidth - content.count)
-                            print(String(repeating: " ", count: padding) + content)
+                            self.printWrapped(content, maxWidth: maxLineWidth, rightAlign: true)
                         } else {
                             print(indent + transcription.text)
                         }
@@ -562,6 +695,12 @@ final class Application {
     
     /// Toggle microphone capture on/off
     private func toggleMicrophoneCapture() {
+        setMicrophoneCapture(enable: nil)
+    }
+    
+    /// Set microphone capture state
+    /// - Parameter enable: true to enable, false to disable, nil to toggle
+    private func setMicrophoneCapture(enable: Bool?) {
         if #available(macOS 13.0, *) {
             guard let engine = audioEngine as? AudioCaptureEngine else {
                 print("\n⚠️  Audio engine not available\n")
@@ -569,6 +708,24 @@ final class Application {
             }
             
             Task {
+                let currentlyEnabled = engine.microphoneEnabled
+                let shouldEnable: Bool
+                
+                if let enable = enable {
+                    // Explicit on/off
+                    shouldEnable = enable
+                    if shouldEnable == currentlyEnabled {
+                        // Already in desired state
+                        let state = shouldEnable ? "enabled" : "disabled"
+                        print("\n🎤 Microphone capture already \(state)\n")
+                        return
+                    }
+                } else {
+                    // Toggle
+                    shouldEnable = !currentlyEnabled
+                }
+                
+                // Perform the toggle (which will set to opposite of current state)
                 let enabled = await engine.toggleMicrophone()
                 if enabled {
                     tui.statusBar.setMicStatus(.active)
@@ -601,8 +758,8 @@ final class Application {
     private func executeTranscribingModeAction(_ command: Command) {
         switch command {
         case .chat(let content):
-            // Requirement 3.3: Send request with context to remote LLM
-            executeLLMQuery(type: "chat", content: content)
+            // Requirement 6.1, 6.2: Send request with context to Cloud LLM (Phase 2)
+            executeCloudLLMQuery(content: content)
             
         case .quick(let content):
             // Requirement 3.4: Send request with context to local LLM (Ollama)
@@ -626,9 +783,9 @@ final class Application {
                 print("   ⚠️  \(error.description)\n")
             }
             
-        case .mic:
-            // Toggle microphone capture on/off
-            toggleMicrophoneCapture()
+        case .mic(let enable):
+            // Toggle or set microphone capture on/off
+            setMicrophoneCapture(enable: enable)
             
         default:
             break
@@ -707,6 +864,110 @@ final class Application {
         _ = semaphore.wait(timeout: .now() + 120)  // 2 minute timeout for LLM response
     }
     
+    /// Execute Cloud LLM query with RAG support (Phase 2)
+    /// Requirements: 6.1, 6.2, 6.3, 6.6 - Cloud LLM queries with sources
+    private func executeCloudLLMQuery(content: String) {
+        print("\n☁️  Cloud LLM query: \"\(content)\"")
+        
+        // Requirement 6.3: Display loading animation
+        tui.showProcessingIndicator()
+        print("   ✻ Processing with Cloud LLM...")
+        fflush(stdout)
+        
+        // Build context from current transcript
+        let context = buildTranscriptContext()
+        
+        // Use semaphore to wait for async task completion
+        let semaphore = DispatchSemaphore(value: 0)
+        
+        // Send query to Python backend via IPC
+        Task {
+            defer { semaphore.signal() }
+            
+            do {
+                // Check if connected, if not try to connect
+                if await !ipcClient.connected {
+                    try await ipcClient.connect()
+                }
+                
+                let startTime = Date()
+                let response = try await ipcClient.sendCloudLLMQuery(
+                    content: content,
+                    context: context,
+                    forceRag: false
+                )
+                let elapsed = Date().timeIntervalSince(startTime)
+                
+                // Hide processing indicator and show response
+                self.tui.hideProcessingIndicator()
+                
+                let ragIndicator = response.usedRag ? " (RAG)" : ""
+                print("\r\u{001B}[K   ✅ Processed in \(String(format: "%.1f", elapsed))s\(ragIndicator)")
+                
+                // Add response to transcript
+                self.tui.addLLMResponse(response.content, model: response.model)
+                
+                // Display response with distinct color (cyan for Cloud LLM)
+                print("\n   \u{001B}[36m☁️  [\(response.model)] Response:\u{001B}[0m")
+                let lines = response.content.split(separator: "\n", omittingEmptySubsequences: false)
+                for line in lines {
+                    print("      \(line)")
+                }
+                
+                // Requirement 6.6: Display sources used from KB
+                if !response.sources.isEmpty {
+                    print("\n   \u{001B}[33m📚 Sources:\u{001B}[0m")
+                    for source in response.sources {
+                        print("      • \(source)")
+                    }
+                }
+                
+                print("")
+                fflush(stdout)
+                
+            } catch let error as IPCError {
+                self.tui.hideProcessingIndicator()
+                
+                switch error {
+                case .cloudLLMError(let errorMsg):
+                    // Requirement 6.5: Display error and suggest /quick
+                    print("\r\u{001B}[K   ❌ Cloud LLM error: \(errorMsg.error)")
+                    if let suggestion = errorMsg.suggestion {
+                        print("   💡 \(suggestion)")
+                    } else {
+                        print("   💡 Try /quick for local LLM")
+                    }
+                    print("")
+                    
+                case .notConnected, .connectionFailed:
+                    print("\r\u{001B}[K   ❌ Python backend not connected.")
+                    print("   💡 Start backend: cd backend && source .venv/bin/activate && python main.py\n")
+                    
+                default:
+                    print("\r\u{001B}[K   ❌ Cloud LLM query failed: \(error.localizedDescription)")
+                    print("   💡 Try /quick for local LLM\n")
+                }
+                fflush(stdout)
+                
+            } catch {
+                self.tui.hideProcessingIndicator()
+                
+                if error.localizedDescription.contains("not connected") ||
+                   error.localizedDescription.contains("Connection") {
+                    print("\r\u{001B}[K   ❌ Python backend not connected.")
+                    print("   💡 Start backend: cd backend && source .venv/bin/activate && python main.py\n")
+                } else {
+                    print("\r\u{001B}[K   ❌ Cloud LLM query failed: \(error.localizedDescription)")
+                    print("   💡 Try /quick for local LLM\n")
+                }
+                fflush(stdout)
+            }
+        }
+        
+        // Wait for async task to complete (with timeout)
+        _ = semaphore.wait(timeout: .now() + 180)  // 3 minute timeout for Cloud LLM response
+    }
+    
     /// Build transcript context for LLM queries
     /// Requirement 7.2: Include current conversation transcript as context
     private func buildTranscriptContext() -> [TranscriptionMessage] {
@@ -725,52 +986,114 @@ final class Application {
     private func executeKBModeAction(_ command: Command) {
         switch command {
         case .list:
-            // Requirement 4.1: Display all documents in knowledge base
-            executeKBList()
+            // Requirement 2.1: Display all documents in knowledge base
+            executeKBList(continuationToken: nil)
+            
+        case .listMore:
+            // Requirement 2.4: Pagination support - use stored token
+            if let token = lastKBContinuationToken {
+                executeKBList(continuationToken: token)
+            } else {
+                print("\n   ⚠️  No more documents to show. Use /list to start from the beginning.\n")
+            }
             
         case .add(let fromPath, let name):
-            // Requirement 4.4, 4.5: Add markdown document to knowledge base
+            // Requirement 3.1-3.5: Add markdown document to knowledge base
             executeKBAdd(fromPath: fromPath, name: name)
             
         case .update(let fromPath, let name):
-            // Requirement 4.3: Update existing document
+            // Requirement 4.1-4.4: Update existing document
             executeKBUpdate(fromPath: fromPath, name: name)
             
         case .remove(let name):
-            // Requirement 4.2: Delete document and confirm deletion
+            // Requirement 5.1-5.3: Delete document and trigger sync
             executeKBRemove(name: name)
+            
+        case .sync:
+            // Trigger KB indexing/sync
+            executeKBSync()
             
         default:
             break
         }
     }
     
-    /// List all KB documents
-    /// Requirement 4.1: Display all documents in the current knowledge base
-    private func executeKBList() {
+    /// List all KB documents with pagination (Phase 2)
+    /// Requirements: 2.1, 2.3, 2.4 - List documents with pagination
+    private func executeKBList(continuationToken: String?) {
         print("\n📋 Knowledge Base Documents:")
         print("   ─────────────────────────────────────")
         
-        // TODO: Connect to Python backend KB Manager (Task 11)
-        // For now, show placeholder message
-        print("   (KB Manager will be implemented in Task 11)")
-        print("   No documents found.")
-        print("")
-        print("   💡 Use /add {path} {name} to add a markdown document")
-        print("")
+        let semaphore = DispatchSemaphore(value: 0)
+        
+        Task {
+            defer { semaphore.signal() }
+            
+            do {
+                // Connect if not connected
+                if await !ipcClient.connected {
+                    try await ipcClient.connect()
+                }
+                
+                let response = try await ipcClient.listKBDocuments(
+                    continuationToken: continuationToken,
+                    maxItems: 20
+                )
+                
+                if response.documents.isEmpty {
+                    print("   (No documents found)")
+                    print("")
+                    print("   💡 Use /add {path} {name} to add a markdown document")
+                } else {
+                    // Requirement 2.3: Sort alphabetically (already sorted by backend)
+                    for doc in response.documents {
+                        print("   📄 \(doc.name)")
+                        print("      Size: \(doc.formattedSize) | Modified: \(doc.formattedDate)")
+                    }
+                    
+                    // Requirement 2.4: Show pagination info
+                    if response.hasMore {
+                        self.lastKBContinuationToken = response.continuationToken
+                        print("")
+                        print("   📑 More documents available. Type /more to see next page.")
+                    } else {
+                        self.lastKBContinuationToken = nil
+                    }
+                }
+                print("")
+                
+            } catch let error as IPCError {
+                switch error {
+                case .kbError(let kbError):
+                    print("   ❌ \(kbError.error)")
+                case .notConnected, .connectionFailed:
+                    print("   ❌ Python backend not connected.")
+                    print("   💡 Start backend: cd backend && source .venv/bin/activate && python main.py")
+                default:
+                    print("   ❌ Failed to list documents: \(error.localizedDescription)")
+                }
+                print("")
+            } catch {
+                print("   ❌ Failed to list documents: \(error.localizedDescription)")
+                print("")
+            }
+        }
+        
+        _ = semaphore.wait(timeout: .now() + 30)
     }
     
-    /// Add document to KB
-    /// Requirements: 4.4, 4.5: Add markdown file, reject non-markdown
+    /// Add document to KB (Phase 2)
+    /// Requirements: 3.1-3.5: Add markdown file with validation
     private func executeKBAdd(fromPath: String, name: String) {
         print("\n➕ Adding document to knowledge base...")
         print("   From: \(fromPath)")
         print("   Name: \(name)")
         
-        // Requirement 4.5: Validate markdown file
-        guard fromPath.lowercased().hasSuffix(".md") else {
-            print("   ❌ Error: Only markdown (.md) files are supported")
-            print("   💡 Please provide a path to a .md file\n")
+        // Requirement 3.3: Validate markdown file
+        let lowercasePath = fromPath.lowercased()
+        guard lowercasePath.hasSuffix(".md") || lowercasePath.hasSuffix(".markdown") else {
+            print("   ❌ Error: Only markdown files are supported (.md, .markdown)")
+            print("   💡 Please provide a path to a markdown file\n")
             return
         }
         
@@ -779,26 +1102,79 @@ final class Application {
         let expandedPath = NSString(string: fromPath).expandingTildeInPath
         
         guard fileManager.fileExists(atPath: expandedPath) else {
+            // Requirement 3.4: Display error for non-existent file
             print("   ❌ Error: File not found at '\(fromPath)'")
             print("   💡 Please check the file path and try again\n")
             return
         }
         
-        // TODO: Connect to Python backend KB Manager (Task 11)
-        print("   ✅ Would add '\(name)' to knowledge base")
-        print("   (KB Manager will be implemented in Task 11)\n")
+        let semaphore = DispatchSemaphore(value: 0)
+        
+        Task {
+            defer { semaphore.signal() }
+            
+            do {
+                // Connect if not connected
+                if await !ipcClient.connected {
+                    try await ipcClient.connect()
+                }
+                
+                let response = try await ipcClient.addKBDocument(
+                    sourcePath: expandedPath,
+                    name: name
+                )
+                
+                if response.success {
+                    // Requirement 3.2: Display confirmation with size
+                    if let doc = response.document {
+                        print("   ✅ Added: \(doc.name) (\(doc.formattedSize))")
+                        print("   📝 Document will be automatically indexed by Bedrock KB")
+                    } else {
+                        print("   ✅ \(response.message)")
+                    }
+                } else {
+                    print("   ❌ \(response.message)")
+                }
+                print("")
+                
+            } catch let error as IPCError {
+                switch error {
+                case .kbError(let kbError):
+                    // Requirement 3.5: Show error if document exists
+                    if kbError.errorType == "exists" {
+                        print("   ❌ Document '\(name)' already exists")
+                        print("   💡 Use /update to replace the existing document")
+                    } else {
+                        print("   ❌ \(kbError.error)")
+                    }
+                case .notConnected, .connectionFailed:
+                    print("   ❌ Python backend not connected.")
+                    print("   💡 Start backend: cd backend && source .venv/bin/activate && python main.py")
+                default:
+                    print("   ❌ Failed to add document: \(error.localizedDescription)")
+                }
+                print("")
+            } catch {
+                print("   ❌ Failed to add document: \(error.localizedDescription)")
+                print("")
+            }
+        }
+        
+        _ = semaphore.wait(timeout: .now() + 60)
     }
     
-    /// Update existing KB document
-    /// Requirement 4.3: Update existing document with content from path
+    /// Update existing KB document (Phase 2)
+    /// Requirements: 4.1-4.4: Update document with validation
     private func executeKBUpdate(fromPath: String, name: String) {
         print("\n🔄 Updating document in knowledge base...")
         print("   From: \(fromPath)")
         print("   Name: \(name)")
         
         // Validate markdown file
-        guard fromPath.lowercased().hasSuffix(".md") else {
-            print("   ❌ Error: Only markdown (.md) files are supported\n")
+        let lowercasePath = fromPath.lowercased()
+        guard lowercasePath.hasSuffix(".md") || lowercasePath.hasSuffix(".markdown") else {
+            // Requirement 4.4: Validate markdown
+            print("   ❌ Error: Only markdown files are supported (.md, .markdown)\n")
             return
         }
         
@@ -807,23 +1183,177 @@ final class Application {
         let expandedPath = NSString(string: fromPath).expandingTildeInPath
         
         guard fileManager.fileExists(atPath: expandedPath) else {
+            // Requirement 4.4: Display error for non-existent file
             print("   ❌ Error: File not found at '\(fromPath)'\n")
             return
         }
         
-        // TODO: Connect to Python backend KB Manager (Task 11)
-        print("   ✅ Would update '\(name)' in knowledge base")
-        print("   (KB Manager will be implemented in Task 11)\n")
+        let semaphore = DispatchSemaphore(value: 0)
+        
+        Task {
+            defer { semaphore.signal() }
+            
+            do {
+                // Connect if not connected
+                if await !ipcClient.connected {
+                    try await ipcClient.connect()
+                }
+                
+                let response = try await ipcClient.updateKBDocument(
+                    sourcePath: expandedPath,
+                    name: name
+                )
+                
+                if response.success {
+                    // Requirement 4.2: Display confirmation with new size
+                    if let doc = response.document {
+                        print("   ✅ Updated: \(doc.name) (\(doc.formattedSize))")
+                        print("   📝 Document will be automatically reindexed by Bedrock KB")
+                    } else {
+                        print("   ✅ \(response.message)")
+                    }
+                } else {
+                    print("   ❌ \(response.message)")
+                }
+                print("")
+                
+            } catch let error as IPCError {
+                switch error {
+                case .kbError(let kbError):
+                    // Requirement 4.3: Show error if document doesn't exist
+                    if kbError.errorType == "not_found" {
+                        print("   ❌ Document '\(name)' not found")
+                        print("   💡 Use /add to create a new document")
+                    } else {
+                        print("   ❌ \(kbError.error)")
+                    }
+                case .notConnected, .connectionFailed:
+                    print("   ❌ Python backend not connected.")
+                    print("   💡 Start backend: cd backend && source .venv/bin/activate && python main.py")
+                default:
+                    print("   ❌ Failed to update document: \(error.localizedDescription)")
+                }
+                print("")
+            } catch {
+                print("   ❌ Failed to update document: \(error.localizedDescription)")
+                print("")
+            }
+        }
+        
+        _ = semaphore.wait(timeout: .now() + 60)
     }
     
-    /// Remove document from KB
-    /// Requirement 4.2: Delete document and confirm deletion
+    /// Remove document from KB (Phase 2)
+    /// Requirements: 5.1-5.3: Delete document and trigger sync
     private func executeKBRemove(name: String) {
         print("\n🗑️  Removing document from knowledge base...")
         print("   Name: \(name)")
         
-        // TODO: Connect to Python backend KB Manager (Task 11)
-        print("   ✅ Would remove '\(name)' from knowledge base")
-        print("   (KB Manager will be implemented in Task 11)\n")
+        let semaphore = DispatchSemaphore(value: 0)
+        
+        Task {
+            defer { semaphore.signal() }
+            
+            do {
+                // Connect if not connected
+                if await !ipcClient.connected {
+                    try await ipcClient.connect()
+                }
+                
+                let response = try await ipcClient.removeKBDocument(name: name)
+                
+                if response.success {
+                    // Requirement 5.2, 5.3: Trigger sync and display status
+                    print("   ✅ Removed: \(name)")
+                    print("   🔄 Triggering Bedrock KB reindexing...")
+                    
+                    // The backend should have triggered sync automatically
+                    // Display sync status
+                    do {
+                        let syncStatus = try await ipcClient.getKBSyncStatus()
+                        print("   \(syncStatus.statusIcon) KB Status: \(syncStatus.status) (\(syncStatus.documentCount) documents)")
+                    } catch {
+                        print("   ⚠️  Could not get sync status")
+                    }
+                } else {
+                    print("   ❌ \(response.message)")
+                }
+                print("")
+                
+            } catch let error as IPCError {
+                switch error {
+                case .kbError(let kbError):
+                    // Requirement 5.4: Show error if document doesn't exist
+                    if kbError.errorType == "not_found" {
+                        print("   ❌ Document '\(name)' not found")
+                        print("   💡 Use /list to see available documents")
+                    } else {
+                        print("   ❌ \(kbError.error)")
+                    }
+                case .notConnected, .connectionFailed:
+                    print("   ❌ Python backend not connected.")
+                    print("   💡 Start backend: cd backend && source .venv/bin/activate && python main.py")
+                default:
+                    print("   ❌ Failed to remove document: \(error.localizedDescription)")
+                }
+                print("")
+            } catch {
+                print("   ❌ Failed to remove document: \(error.localizedDescription)")
+                print("")
+            }
+        }
+        
+        _ = semaphore.wait(timeout: .now() + 60)
+    }
+    
+    /// Trigger KB sync/indexing (Phase 2)
+    /// Requirements: 5.2 - Trigger Bedrock KB reindexing
+    private func executeKBSync() {
+        print("\n🔄 Triggering Knowledge Base sync...")
+        
+        let semaphore = DispatchSemaphore(value: 0)
+        
+        Task {
+            defer { semaphore.signal() }
+            
+            do {
+                // Connect if not connected
+                if await !ipcClient.connected {
+                    try await ipcClient.connect()
+                }
+                
+                let response = try await ipcClient.triggerKBSync()
+                
+                if response.success {
+                    print("   ✅ Sync triggered successfully")
+                    if let jobId = response.ingestionJobId {
+                        print("   📋 Ingestion Job ID: \(jobId)")
+                    }
+                    if !response.message.isEmpty {
+                        print("   ℹ️  \(response.message)")
+                    }
+                } else {
+                    print("   ❌ \(response.message)")
+                }
+                print("")
+                
+            } catch let error as IPCError {
+                switch error {
+                case .kbError(let kbError):
+                    print("   ❌ \(kbError.error)")
+                case .notConnected, .connectionFailed:
+                    print("   ❌ Python backend not connected.")
+                    print("   💡 Start backend: cd backend && source .venv/bin/activate && python main.py")
+                default:
+                    print("   ❌ Failed to trigger sync: \(error.localizedDescription)")
+                }
+                print("")
+            } catch {
+                print("   ❌ Failed to trigger sync: \(error.localizedDescription)")
+                print("")
+            }
+        }
+        
+        _ = semaphore.wait(timeout: .now() + 60)
     }
 }

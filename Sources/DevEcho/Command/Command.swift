@@ -9,17 +9,19 @@ enum Command: Equatable {
     case quit                                   // /quit - Exit application or return to command mode
     
     // Transcribing Mode
-    case chat(content: String)                  // /chat {contents} - Query remote LLM
+    case chat(content: String)                  // /chat {contents} - Query Cloud LLM (Phase 2)
     case quick(content: String)                 // /quick {contents} - Query local LLM
     case stop                                   // /stop - Stop audio capture
     case save                                   // /save - Save transcript
-    case mic                                    // /mic - Toggle microphone capture
+    case mic(enable: Bool?)                     // /mic [on|off] - Toggle or set microphone capture
     
     // KB Management Mode
     case list                                   // /list - List KB documents
+    case listMore(token: String)                // /more - List more KB documents (pagination)
     case remove(name: String)                   // /remove {name} - Remove document
     case update(fromPath: String, name: String) // /update {from_path} {name} - Update document
     case add(fromPath: String, name: String)    // /add {from_path} {name} - Add document
+    case sync                                   // /sync - Trigger KB indexing/sync
     
     // Error case
     case unknown(input: String)                 // Unrecognized command
@@ -42,16 +44,23 @@ extension Command: CustomStringConvertible {
             return "/stop"
         case .save:
             return "/save"
-        case .mic:
+        case .mic(let enable):
+            if let enable = enable {
+                return "/mic \(enable ? "on" : "off")"
+            }
             return "/mic"
         case .list:
             return "/list"
+        case .listMore(let token):
+            return "/more (token: \(token.prefix(8))...)"
         case .remove(let name):
             return "/remove \(name)"
         case .update(let fromPath, let name):
             return "/update \(fromPath) \(name)"
         case .add(let fromPath, let name):
             return "/add \(fromPath) \(name)"
+        case .sync:
+            return "/sync"
         case .unknown(let input):
             return "unknown: \(input)"
         }

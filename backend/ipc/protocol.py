@@ -21,10 +21,15 @@ class MessageType(str, Enum):
     TRANSCRIPTION = "transcription"
     TRANSCRIPTION_ERROR = "transcription_error"
     
-    # LLM messages
+    # LLM messages (Phase 1 - Local LLM)
     LLM_QUERY = "llm_query"
     LLM_RESPONSE = "llm_response"
     LLM_ERROR = "llm_error"
+    
+    # Cloud LLM messages (Phase 2)
+    CLOUD_LLM_QUERY = "cloud_llm_query"
+    CLOUD_LLM_RESPONSE = "cloud_llm_response"
+    CLOUD_LLM_ERROR = "cloud_llm_error"
     
     # Knowledge Base messages
     KB_LIST = "kb_list"
@@ -34,6 +39,10 @@ class MessageType(str, Enum):
     KB_REMOVE = "kb_remove"
     KB_RESPONSE = "kb_response"
     KB_ERROR = "kb_error"
+    
+    # Knowledge Base sync messages (Phase 2)
+    KB_SYNC_STATUS = "kb_sync_status"
+    KB_SYNC_TRIGGER = "kb_sync_trigger"
     
     # Control messages
     PING = "ping"
@@ -315,4 +324,195 @@ class KBErrorMessage:
         return cls(
             error=payload["error"],
             error_type=payload.get("error_type", "other")
+        )
+
+
+
+# Phase 2: Cloud LLM Messages
+
+@dataclass
+class CloudLLMQueryMessage:
+    """Cloud LLM query with RAG support (Phase 2)."""
+    
+    content: str
+    context: List[dict]  # List of TranscriptionMessage dicts
+    force_rag: bool = False  # Force RAG even if intent classifier says otherwise
+    
+    def to_ipc_message(self) -> IPCMessage:
+        return IPCMessage(
+            type=MessageType.CLOUD_LLM_QUERY,
+            payload=asdict(self)
+        )
+    
+    @classmethod
+    def from_payload(cls, payload: dict) -> "CloudLLMQueryMessage":
+        return cls(
+            content=payload["content"],
+            context=payload.get("context", []),
+            force_rag=payload.get("force_rag", False)
+        )
+
+
+@dataclass
+class CloudLLMResponseMessage:
+    """Cloud LLM response with sources (Phase 2)."""
+    
+    content: str
+    model: str
+    sources: List[str]  # Document names used from KB
+    tokens_used: int = 0
+    used_rag: bool = False
+    
+    def to_ipc_message(self) -> IPCMessage:
+        return IPCMessage(
+            type=MessageType.CLOUD_LLM_RESPONSE,
+            payload=asdict(self)
+        )
+    
+    @classmethod
+    def from_payload(cls, payload: dict) -> "CloudLLMResponseMessage":
+        return cls(
+            content=payload["content"],
+            model=payload["model"],
+            sources=payload.get("sources", []),
+            tokens_used=payload.get("tokens_used", 0),
+            used_rag=payload.get("used_rag", False)
+        )
+
+
+@dataclass
+class CloudLLMErrorMessage:
+    """Error response for Cloud LLM operations (Phase 2)."""
+    
+    error: str
+    error_type: str  # "credentials", "service_unavailable", "throttling", "model_error", "other"
+    suggestion: Optional[str] = None  # e.g., "Try /quick for local LLM"
+    
+    def to_ipc_message(self) -> IPCMessage:
+        return IPCMessage(
+            type=MessageType.CLOUD_LLM_ERROR,
+            payload=asdict(self)
+        )
+    
+    @classmethod
+    def from_payload(cls, payload: dict) -> "CloudLLMErrorMessage":
+        return cls(
+            error=payload["error"],
+            error_type=payload.get("error_type", "other"),
+            suggestion=payload.get("suggestion")
+        )
+
+
+# Phase 2: Extended KB Messages with S3 Pagination
+
+@dataclass
+class KBListRequestMessage:
+    """Request to list KB documents with pagination (Phase 2)."""
+    
+    continuation_token: Optional[str] = None
+    max_items: int = 20
+    
+    def to_ipc_message(self) -> IPCMessage:
+        return IPCMessage(
+            type=MessageType.KB_LIST,
+            payload=asdict(self)
+        )
+    
+    @classmethod
+    def from_payload(cls, payload: dict) -> "KBListRequestMessage":
+        return cls(
+            continuation_token=payload.get("continuation_token"),
+            max_items=payload.get("max_items", 20)
+        )
+
+
+@dataclass
+class KBListResponseWithPaginationMessage:
+    """Response with list of KB documents and pagination info (Phase 2)."""
+    
+    documents: List[dict]  # List of S3Document dicts
+    has_more: bool
+    continuation_token: Optional[str] = None
+    
+    def to_ipc_message(self) -> IPCMessage:
+        return IPCMessage(
+            type=MessageType.KB_LIST_RESPONSE,
+            payload={
+                "documents": self.documents,
+                "has_more": self.has_more,
+                "continuation_token": self.continuation_token
+            }
+        )
+    
+    @classmethod
+    def from_payload(cls, payload: dict) -> "KBListResponseWithPaginationMessage":
+        return cls(
+            documents=payload.get("documents", []),
+            has_more=payload.get("has_more", False),
+            continuation_token=payload.get("continuation_token")
+        )
+
+
+# Phase 2: KB Sync Messages
+
+@dataclass
+class KBSyncStatusMessage:
+    """Bedrock KB sync status (Phase 2)."""
+    
+    status: str  # "SYNCING", "READY", "FAILED", "UNKNOWN"
+    document_count: int
+    last_sync: Optional[float] = None
+    error_message: Optional[str] = None
+    
+    def to_ipc_message(self) -> IPCMessage:
+        return IPCMessage(
+            type=MessageType.KB_SYNC_STATUS,
+            payload=asdict(self)
+        )
+    
+    @classmethod
+    def from_payload(cls, payload: dict) -> "KBSyncStatusMessage":
+        return cls(
+            status=payload["status"],
+            document_count=payload.get("document_count", 0),
+            last_sync=payload.get("last_sync"),
+            error_message=payload.get("error_message")
+        )
+
+
+@dataclass
+class KBSyncTriggerMessage:
+    """Request to trigger KB sync/reindexing (Phase 2)."""
+    
+    def to_ipc_message(self) -> IPCMessage:
+        return IPCMessage(
+            type=MessageType.KB_SYNC_TRIGGER,
+            payload={}
+        )
+    
+    @classmethod
+    def from_payload(cls, payload: dict) -> "KBSyncTriggerMessage":
+        return cls()
+
+
+@dataclass
+class KBSyncTriggerResponseMessage:
+    """Response for KB sync trigger (Phase 2)."""
+    
+    success: bool
+    ingestion_job_id: Optional[str] = None
+    message: str = ""
+    
+    def to_ipc_message(self) -> IPCMessage:
+        return IPCMessage(
+            type=MessageType.KB_RESPONSE,
+            payload=asdict(self)
+        )
+    
+    @classmethod
+    def from_payload(cls, payload: dict) -> "KBSyncTriggerResponseMessage":
+        return cls(
+            success=payload["success"],
+            ingestion_job_id=payload.get("ingestion_job_id"),
+            message=payload.get("message", "")
         )
