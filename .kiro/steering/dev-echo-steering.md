@@ -28,10 +28,15 @@ This file contains:
 | **Conversation with user** (explanations, Q&A, planning discussions) | **Korean** |
 
 ## Project References
-- **Spec**: `.kiro/specs/dev-echo-phase1/` (requirements, design, tasks)
+- **Phase 1 Spec**: `.kiro/specs/dev-echo-phase1/` ✅ Complete
+- **Phase 2 Spec**: `.kiro/specs/dev-echo-phase2/` (Cloud Services, Knowledge Base)
 - **Status**: `KIRO.md` (implementation progress)
 - **Swift Code**: `Sources/DevEcho/`
 - **Python Code**: `backend/`
+
+## Strands Agent References
+- Quick Start: https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/python/
+- Knowledge Base Agent: https://strandsagents.com/latest/documentation/docs/examples/python/knowledge_base_agent/
 
 ## Build & Run Commands
 ```bash
