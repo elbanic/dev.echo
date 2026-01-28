@@ -209,8 +209,8 @@ start_backend() {
     BACKEND_PID=$!
     
     # Wait for socket to be created (MLX-Whisper model loading takes time)
-    log_info "Waiting for backend to initialize (loading MLX-Whisper model - max 2 min)..."
-    local max_wait=120  # 2 minutes for model loading
+    log_info "Waiting for backend to initialize (loading MLX-Whisper model - max 5 min)..."
+    local max_wait=300  # 5 minutes for model loading
     local waited=0
     while [[ ! -S "$SOCKET_PATH" ]] && [[ $waited -lt $max_wait ]]; do
         sleep 1

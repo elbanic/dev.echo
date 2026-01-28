@@ -15,8 +15,8 @@ Real-time audio transcription & AI assistant for software developers. Capture sy
 - macOS 13.0+ (ScreenCaptureKit required)
 - Xcode (for ScreenCaptureKit compilation)
 - Python 3.10+
-- Ollama (local LLM)
-- AWS account (for cloud features)
+- Ollama (for local LLM `/quick` queries)
+- AWS account (optional, for cloud features `/chat` and KB)
 
 ## Installation
 
@@ -30,11 +30,16 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-# 3. Configure AWS (optional, for cloud features)
+# 3. Install and setup Ollama (for local LLM)
+brew install ollama
+ollama serve  # Start Ollama service (in a separate terminal)
+ollama pull llama3.2:3b  # Download the model
+
+# 4. Configure AWS (optional, for cloud features)
 cp .env.dev.example .env.dev
 # Edit .env.dev with your AWS settings
 
-# 4. Install launcher script (optional)
+# 5. Install launcher script (optional)
 chmod +x scripts/dev-echo
 sudo ln -s "$(pwd)/scripts/dev-echo" /usr/local/bin/dev-echo
 ```

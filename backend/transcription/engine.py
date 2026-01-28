@@ -105,15 +105,21 @@ class TranscriptionEngine:
                 
                 # Load model (this downloads if not cached)
                 # Run in executor to avoid blocking event loop
+                # Timeout set to 300 seconds (5 minutes) for slow machines
                 loop = asyncio.get_event_loop()
-                await loop.run_in_executor(
-                    None,
-                    self._load_model
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, self._load_model),
+                    timeout=300.0
                 )
                 
                 self._initialized = True
                 logger.info("MLX-Whisper model initialized successfully")
                 
+            except asyncio.TimeoutError:
+                logger.error("Model initialization timed out after 300 seconds")
+                raise ModelInitializationError(
+                    "Model initialization timed out. Please check your system resources."
+                )
             except ImportError as e:
                 logger.error("mlx-whisper not installed. Run: pip install mlx-whisper")
                 raise ModelInitializationError(
