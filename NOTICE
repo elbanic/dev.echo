@@ -1,0 +1,66 @@
+dev.echo
+Copyright (c) 2026 dev.echo team
+
+This product includes software developed by third parties:
+
+================================================================================
+
+OpenAI Whisper
+Copyright (c) 2022 OpenAI
+Licensed under the MIT License
+https://github.com/openai/whisper
+
+--------------------------------------------------------------------------------
+
+MLX-Whisper
+Copyright (c) 2023 Apple Inc.
+Licensed under the MIT License
+https://github.com/ml-explore/mlx-examples
+
+--------------------------------------------------------------------------------
+
+Llama 3.2
+Copyright (c) Meta Platforms, Inc.
+Licensed under the Llama 3.2 Community License
+
+Llama 3.2 is licensed under the Llama 3.2 Community License, 
+Copyright © Meta Platforms, Inc. All Rights Reserved.
+
+When using Llama models, you must comply with:
+- Llama 3.2 Community License Agreement
+- Meta's Acceptable Use Policy
+- Monthly active user restrictions (700M threshold)
+
+Full license: https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE
+
+--------------------------------------------------------------------------------
+
+AWS SDK for Python (boto3)
+Copyright Amazon.com, Inc. or its affiliates
+Licensed under the Apache License 2.0
+https://github.com/boto/boto3
+
+--------------------------------------------------------------------------------
+
+Ollama
+Licensed under the MIT License
+https://github.com/ollama/ollama
+
+--------------------------------------------------------------------------------
+
+Apple MLX Framework
+Copyright (c) 2023 Apple Inc.
+Licensed under the MIT License
+https://github.com/ml-explore/mlx
+
+--------------------------------------------------------------------------------
+
+Swift Logging API
+Copyright (c) 2018-2019 Apple Inc. and the Swift project authors
+Licensed under the Apache License 2.0
+https://github.com/apple/swift-log
+
+================================================================================
+
+For the complete text of each license, please refer to the LICENSE file
+and the respective project repositories.

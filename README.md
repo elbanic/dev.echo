@@ -201,3 +201,27 @@ export DEVECHO_BEDROCK_MODEL="us.anthropic.claude-sonnet-4-20250514-v1:0"
 ❯ /quick what was decided?          # Quick query with local LLM
 🤖 The team agreed on the proposed design approach.
 ```
+
+## License
+
+dev.echo is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+### Third-Party Licenses
+
+This project uses the following third-party software:
+
+- **OpenAI Whisper & MLX-Whisper**: MIT License
+- **Llama 3.2** (via Ollama): Llama 3.2 Community License
+  - ⚠️ **Important**: Subject to Meta's usage restrictions
+  - Free for applications with <700M monthly active users
+  - Must comply with [Acceptable Use Policy](https://www.llama.com/llama3_2/use-policy)
+  - See [full license](https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE)
+- **AWS SDK (boto3)**: Apache License 2.0
+- **Ollama**: MIT License
+- **Apple MLX**: MIT License
+
+See [NOTICE](NOTICE) for complete third-party notices.
+
+### Built with Llama
+
+This project uses Meta's Llama 3.2 models for local LLM functionality.
