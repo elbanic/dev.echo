@@ -165,8 +165,12 @@ struct Transcript: Identifiable {
     
     // MARK: - Markdown Export
     
-    /// Convert transcript to markdown format
-    /// Format: 🔊 [HH:mm:ss] text content
+    /// Time interval threshold for aggregating consecutive entries from the same source
+    private static let aggregationInterval: TimeInterval = 7.0
+    
+    /// Convert transcript to markdown format with aggregated entries
+    /// Consecutive entries from the same source within 7 seconds are merged into one line
+    /// Format: 🔊 [HH:mm:ss] aggregated text content
     func toMarkdown() -> String {
         var markdown = "# Transcript\n\n"
         
@@ -186,19 +190,22 @@ struct Transcript: Identifiable {
         }
         markdown += "\n---\n\n"
         
-        // Combine and sort all entries
+        // Aggregate transcript entries by source and time proximity
+        let aggregatedEntries = aggregateEntries()
+        
+        // Combine aggregated entries with LLM responses
         var allItems: [(date: Date, markdown: String)] = []
         
-        for entry in entries {
-            let icon = entry.source == .system ? "🔊" : "🎤"
-            let time = timeFormatter.string(from: entry.timestamp)
-            let line = "\(icon) [\(time)] \(entry.text)"
-            allItems.append((entry.timestamp, line))
+        for aggregated in aggregatedEntries {
+            let icon = aggregated.source == .system ? "🔊" : "🎤"
+            let time = timeFormatter.string(from: aggregated.startTime)
+            let line = "\(icon) [\(time)] \(aggregated.text)"
+            allItems.append((aggregated.startTime, line))
         }
         
         for response in llmResponses {
             let time = timeFormatter.string(from: response.timestamp)
-            let line = "🤖 [\(time)] (\(response.model))\n\(response.content)"
+            let line = "\n🤖 [\(time)] (\(response.model))\n\(response.content)\n"
             allItems.append((response.timestamp, line))
         }
         
@@ -211,5 +218,62 @@ struct Transcript: Identifiable {
         }
         
         return markdown
+    }
+    
+    /// Aggregated entry representing merged consecutive entries
+    private struct AggregatedEntry {
+        let source: AudioSource
+        let startTime: Date
+        var text: String
+        var lastTime: Date
+    }
+    
+    /// Aggregate consecutive entries from the same source within the time threshold
+    private func aggregateEntries() -> [AggregatedEntry] {
+        guard !entries.isEmpty else { return [] }
+        
+        // Sort entries by timestamp
+        let sortedEntries = entries.sorted { $0.timestamp < $1.timestamp }
+        
+        var aggregated: [AggregatedEntry] = []
+        var current: AggregatedEntry?
+        
+        for entry in sortedEntries {
+            if var curr = current {
+                let timeDiff = entry.timestamp.timeIntervalSince(curr.lastTime)
+                let sameSource = entry.source == curr.source
+                
+                if sameSource && timeDiff <= Self.aggregationInterval {
+                    // Merge with current aggregated entry
+                    curr.text += " " + entry.text
+                    curr.lastTime = entry.timestamp
+                    current = curr
+                } else {
+                    // Start new aggregated entry
+                    aggregated.append(curr)
+                    current = AggregatedEntry(
+                        source: entry.source,
+                        startTime: entry.timestamp,
+                        text: entry.text,
+                        lastTime: entry.timestamp
+                    )
+                }
+            } else {
+                // First entry
+                current = AggregatedEntry(
+                    source: entry.source,
+                    startTime: entry.timestamp,
+                    text: entry.text,
+                    lastTime: entry.timestamp
+                )
+            }
+        }
+        
+        // Don't forget the last aggregated entry
+        if let curr = current {
+            aggregated.append(curr)
+        }
+        
+        return aggregated
     }
 }

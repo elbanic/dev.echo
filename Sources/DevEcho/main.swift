@@ -518,22 +518,24 @@ final class Application {
             skipNextStatusBar = true
             
             Task {
-                let currentlyEnabled = engine.microphoneEnabled
+                // Use microphoneStatus (actual capture state) instead of microphoneEnabled
+                let currentlyActive = engine.microphoneStatus == .active
                 let shouldEnable: Bool
                 
                 if let enable = enable {
                     shouldEnable = enable
-                    if shouldEnable == currentlyEnabled {
+                    if shouldEnable == currentlyActive {
                         let state = shouldEnable ? "enabled" : "disabled"
                         print("\n🎤 Microphone capture already \(state)")
                         self.printCurrentStatusBar()
                         return
                     }
                 } else {
-                    shouldEnable = !currentlyEnabled
+                    shouldEnable = !currentlyActive
                 }
                 
-                let enabled = await engine.toggleMicrophone()
+                // Set microphone to desired state
+                let enabled = await engine.setMicrophoneEnabled(shouldEnable)
                 if enabled {
                     print("\n🎤 Microphone capture enabled")
                 } else {

@@ -169,35 +169,57 @@ final class AudioCaptureEngine: AudioCaptureDelegate {
     /// Returns the new enabled state
     @discardableResult
     func toggleMicrophone() async -> Bool {
-        microphoneEnabled.toggle()
-        
-        if microphoneEnabled {
-            // Re-enable microphone capture
+        let shouldEnable = microphoneStatus != .active
+        return await setMicrophoneEnabled(shouldEnable)
+    }
+    
+    /// Set microphone capture to specific state
+    /// Returns the actual enabled state after the operation
+    @discardableResult
+    func setMicrophoneEnabled(_ enabled: Bool) async -> Bool {
+        if enabled {
+            // Enable microphone capture
+            guard microphoneStatus != .active else {
+                // Already active
+                microphoneEnabled = true
+                return true
+            }
+            
             let hasPermission = micCapture.checkPermission()
             if hasPermission {
                 do {
                     try micCapture.startCapture()
                     microphoneStatus = .active
+                    microphoneEnabled = true
                     onStatusUpdate?(.microphone, .active)
                     logger.info("Microphone capture enabled")
+                    return true
                 } catch {
-                    logger.error("Failed to restart microphone: \(error.localizedDescription)")
+                    logger.error("Failed to start microphone: \(error.localizedDescription)")
                     microphoneEnabled = false
                     onError?(error as? AudioCaptureError ?? .captureFailure(underlying: error))
+                    return false
                 }
             } else {
                 logger.warning("Microphone permission not granted")
                 microphoneEnabled = false
+                return false
             }
         } else {
             // Disable microphone capture
+            guard microphoneStatus == .active else {
+                // Already inactive
+                microphoneEnabled = false
+                return false
+            }
+            
             micCapture.stopCapture()
             microphoneStatus = .inactive
+            microphoneEnabled = false
             onStatusUpdate?(.microphone, .inactive)
             logger.info("Microphone capture disabled")
+            return false
         }
-        
-        return microphoneEnabled
     }
     
     // MARK: - AudioCaptureDelegate
