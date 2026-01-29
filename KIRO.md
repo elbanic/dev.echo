@@ -137,7 +137,7 @@ Key implementation details:
 | **KBService** | `Services/KBService.swift` | KB CRUD operations via IPC |
 | **LLMService** | `Services/LLMService.swift` | Local/Cloud LLM queries via IPC |
 | **TerminalRenderer** | `Services/TerminalRenderer.swift` | Display width, wrapping, status line |
-| **InputHandler** | `Services/InputHandler.swift` | Raw mode terminal input handling |
+| **InputHandler** | `Services/InputHandler.swift` | Raw mode terminal input, command history, cursor navigation |
 | **Command** | `Command.swift` | All command variants enum |
 | **CommandParser** | `CommandParser.swift` | String → Command parsing with validation |
 | **IPCClient** | `IPCClient.swift` | Unix socket client for Python backend |
@@ -249,6 +249,14 @@ swift test                      # Swift tests
 - **Runtime toggle**: Press `Ctrl+B` to toggle debug mode while running
 - **Scope**: Affects IPCClient, AudioCaptureEngine, SystemAudioCapture, MicrophoneCapture
 - **Default**: Debug OFF (only warnings and transcription output shown)
+
+### Input Handler Features
+The `InputHandler` provides shell-like input experience:
+- **Command History**: Up/Down arrow keys navigate through previously entered commands
+- **Cursor Navigation**: Left/Right arrow keys move cursor within current input
+- **Tab Completion**: Tab key cycles through matching commands (for `/` prefixed commands)
+- **In-place Editing**: Insert/delete characters at cursor position
+- **History Persistence**: Commands stored in memory (max 100 entries per session)
 
 ### Backend Debug Mode
 The Python backend debug mode can be enabled in several ways:

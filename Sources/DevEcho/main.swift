@@ -120,7 +120,7 @@ final class Application {
                         let statusIcon = source == .system ? "🔊" : "🎤"
                         let statusText = status == .active ? "ON" : "--"
                         print("\r\u{001B}[K   \(statusIcon) \(statusText)")
-                        print("❯ \(self.inputHandler.getCurrentInput())", terminator: "")
+                        print("❯ \(self.inputHandler.getPromptWithCursor())", terminator: "")
                         fflush(stdout)
                     }
                 }
@@ -384,11 +384,11 @@ final class Application {
                         )
                         print(statusLine)
                     }
-                    print("❯ \(self.inputHandler.getCurrentInput())", terminator: "")
+                    print("❯ \(self.inputHandler.getPromptWithCursor())", terminator: "")
                     fflush(stdout)
                 } catch {
                     print("\r\u{001B}[K   ❌ Failed to start audio capture: \(error.localizedDescription)")
-                    print("❯ \(self.inputHandler.getCurrentInput())", terminator: "")
+                    print("❯ \(self.inputHandler.getPromptWithCursor())", terminator: "")
                     fflush(stdout)
                 }
             }
@@ -404,7 +404,7 @@ final class Application {
             let syncStatus = try await kbService.getSyncStatus()
             tui.statusBar.setKBStatus(from: syncStatus)
             print("\r\u{001B}[K   \(syncStatus.statusIcon) KB: \(syncStatus.status) (\(syncStatus.documentCount) documents)")
-            print("❯ \(self.inputHandler.getCurrentInput())", terminator: "")
+            print("❯ \(self.inputHandler.getPromptWithCursor())", terminator: "")
             fflush(stdout)
         } catch {
             tui.statusBar.setKBStatus(isConnected: false, status: "UNKNOWN", documentCount: 0)
@@ -461,7 +461,7 @@ final class Application {
                     }
                 }
                 
-                print("❯ \(self.inputHandler.getCurrentInput())", terminator: "")
+                print("❯ \(self.inputHandler.getPromptWithCursor())", terminator: "")
                 fflush(stdout)
             }
         }
@@ -567,7 +567,7 @@ final class Application {
             micStatus: micStatus
         )
         print(statusLine)
-        print("❯ \(inputHandler.getCurrentInput())", terminator: "")
+        print("❯ \(inputHandler.getPromptWithCursor())", terminator: "")
         fflush(stdout)
     }
     

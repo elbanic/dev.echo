@@ -28,7 +28,8 @@ final class AudioCaptureEngine: AudioCaptureDelegate {
     private(set) var microphoneStatus: CaptureStatus = .inactive
     
     /// Whether microphone capture is enabled (can be toggled by user)
-    private(set) var microphoneEnabled: Bool = true
+    /// Default: false - user must explicitly enable with /mic on
+    private(set) var microphoneEnabled: Bool = false
     
     /// Reference to microphone capture for toggle functionality
     private var micCaptureRef: MicrophoneCapture { micCapture }
@@ -122,8 +123,9 @@ final class AudioCaptureEngine: AudioCaptureDelegate {
             }
         }
         
-        // Start microphone capture
-        if permissions.microphone {
+        // Start microphone capture only if explicitly enabled
+        // Default is OFF - user can enable with /mic on
+        if permissions.microphone && microphoneEnabled {
             do {
                 try micCapture.startCapture()
                 microphoneStatus = .active
@@ -133,6 +135,11 @@ final class AudioCaptureEngine: AudioCaptureDelegate {
                 logger.error("Failed to start microphone: \(error.localizedDescription)")
                 onError?(error as? AudioCaptureError ?? .captureFailure(underlying: error))
             }
+        } else {
+            // Microphone is available but disabled by default
+            microphoneStatus = .inactive
+            onStatusUpdate?(.microphone, .inactive)
+            logger.info("Microphone capture disabled by default (use /mic on to enable)")
         }
         
         // Throw if neither could start
