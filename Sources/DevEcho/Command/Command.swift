@@ -1,0 +1,79 @@
+import Foundation
+
+/// All available commands in dev.echo CLI
+/// Supports Command Mode, Transcribing Mode, and KB Management Mode operations
+enum Command: Equatable {
+    // Command Mode
+    case new                                    // /new - Start transcribing
+    case managekb                               // /managekb - Enter KB management mode
+    case quit                                   // /quit - Exit application or return to command mode
+    
+    // Transcribing Mode
+    case chat(content: String)                  // /chat {contents} - Query Cloud LLM (Phase 2)
+    case quick(content: String)                 // /quick {contents} - Query local LLM
+    case stop                                   // /stop - Stop audio capture
+    case save                                   // /save - Save transcript
+    case mic(enable: Bool?)                     // /mic [on|off] - Toggle or set microphone capture
+    
+    // KB Management Mode
+    case list                                   // /list - List KB documents
+    case listMore(token: String)                // /more - List more KB documents (pagination)
+    case remove(name: String)                   // /remove {name} - Remove document
+    case update(fromPath: String, name: String) // /update {from_path} {name} - Update document
+    case add(fromPath: String, name: String)    // /add {from_path} {name} - Add document
+    case sync                                   // /sync - Trigger KB indexing/sync
+
+    // Reading Mode
+    case read                                   // /read - Enter reading mode
+    case voice(name: String?)                   // /voice [name] - List or change voice
+
+    // Error case
+    case unknown(input: String)                 // Unrecognized command
+}
+
+extension Command: CustomStringConvertible {
+    var description: String {
+        switch self {
+        case .new:
+            return "/new"
+        case .managekb:
+            return "/managekb"
+        case .quit:
+            return "/quit"
+        case .chat(let content):
+            return "/chat \(content)"
+        case .quick(let content):
+            return "/quick \(content)"
+        case .stop:
+            return "/stop"
+        case .save:
+            return "/save"
+        case .mic(let enable):
+            if let enable = enable {
+                return "/mic \(enable ? "on" : "off")"
+            }
+            return "/mic"
+        case .list:
+            return "/list"
+        case .listMore(let token):
+            return "/more (token: \(token.prefix(8))...)"
+        case .remove(let name):
+            return "/remove \(name)"
+        case .update(let fromPath, let name):
+            return "/update \(fromPath) \(name)"
+        case .add(let fromPath, let name):
+            return "/add \(fromPath) \(name)"
+        case .sync:
+            return "/sync"
+        case .read:
+            return "/read"
+        case .voice(let name):
+            if let name = name {
+                return "/voice \(name)"
+            }
+            return "/voice"
+        case .unknown(let input):
+            return "unknown: \(input)"
+        }
+    }
+}
